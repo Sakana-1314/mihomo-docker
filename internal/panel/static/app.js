@@ -140,13 +140,13 @@ function renderTraffic(t) {
   $('t-up-speed').textContent = `${fmtBytes(t.up_speed)}/s`;
   $('t-conns').textContent = t.connections;
   $('t-memory').textContent = fmtBytes(t.memory);
-  $('traffic-updated').textContent = t.ts ? `更新于 ${new Date(t.ts * 1000).toLocaleTimeString('zh-CN', { hour12: false })}` : '-';
+  $('traffic-updated').textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`;
 }
 
 async function refreshTraffic() {
   if (document.visibilityState !== 'visible' || !state.status) return;
   try {
-    const t = await api('cgi-bin/traffic.sh');
+    const t = await api('api/traffic');
     renderTraffic(t);
   } catch (e) { /* 忽略瞬时错误 */ }
 }
@@ -183,10 +183,14 @@ function renderSubs(subs) {
   }).join('');
 }
 
-async function subsAction(body, label) {
+async function subsAction(url, body, label, method) {
   $('subs-message').textContent = `${label}…`;
   try {
-    const data = await post(body);
+    const data = await api(url, {
+      method: method || 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: body || '',
+    });
     const ok = data.ok;
     $('subs-message').textContent = data.output || (ok ? '完成' : (data.error || '失败'));
     if (!ok) toast((data.output || data.error || '操作失败'), false);
@@ -200,23 +204,23 @@ async function subsAction(body, label) {
 
 function initSubs() {
   $('subs-refresh').addEventListener('click', () => refreshStatus(true));
-  $('subs-update-all').addEventListener('click', () => subsAction('action=update&name=all', '更新全部订阅'));
+  $('subs-update-all').addEventListener('click', () => subsAction('api/subs/update', 'name=all', '更新全部订阅'));
   $('add-submit').addEventListener('click', () => {
     const name = $('add-name').value.trim();
     const url = $('add-url').value.trim();
     const type = $('add-type').value;
     if (!name || !url) { toast('请填写名称与订阅地址', false); return; }
-    subsAction(`action=add&name=${encodeURIComponent(name)}&url=${encodeURIComponent(url)}&type=${encodeURIComponent(type)}`, '添加订阅');
+    subsAction('api/subs', `name=${encodeURIComponent(name)}&url=${encodeURIComponent(url)}&type=${encodeURIComponent(type)}`, '添加订阅');
   });
   $('subs-table').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-op]');
     if (!btn) return;
     const name = btn.getAttribute('data-name');
     const op = btn.getAttribute('data-op');
-    if (op === 'switch') subsAction(`action=switch&name=${encodeURIComponent(name)}`, `切换到 ${name}`);
-    if (op === 'update') subsAction(`action=update&name=${encodeURIComponent(name)}`, `更新 ${name}`);
+    if (op === 'switch') subsAction('api/subs/switch', `name=${encodeURIComponent(name)}`, `切换到 ${name}`);
+    if (op === 'update') subsAction('api/subs/update', `name=${encodeURIComponent(name)}`, `更新 ${name}`);
     if (op === 'del' && window.confirm(`确认删除订阅 ${name}？`)) {
-      subsAction(`action=del&name=${encodeURIComponent(name)}`, `删除 ${name}`);
+      subsAction(`api/subs/${encodeURIComponent(name)}`, '', `删除 ${name}`, 'DELETE');
     }
   });
 }
@@ -224,7 +228,7 @@ function initSubs() {
 /* ---------------------------------------------------------------- 节点 */
 async function refreshNodes() {
   try {
-    const data = await api('cgi-bin/nodes.sh');
+    const data = await api('api/nodes');
     if (!data.ok) { $('nodes-grid').innerHTML = `<span class="hint">${esc(data.error || '内核未就绪')}</span>`; return; }
     state.groups = data.groups || [];
     if (!state.groups.length) {
@@ -252,10 +256,10 @@ function renderNodes() {
 async function selectNode(node) {
   const group = state.group;
   try {
-    const data = await api('cgi-bin/nodes.sh', {
+    const data = await api('api/nodes/select', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: `action=select&group=${encodeURIComponent(group)}&node=${encodeURIComponent(node)}`,
+      body: `group=${encodeURIComponent(group)}&node=${encodeURIComponent(node)}`,
     });
     if (data.ok) {
       toast(`已切换到 ${node}`, true);
@@ -297,7 +301,7 @@ function initSecret() {
 /* ---------------------------------------------------------------- 主流程 */
 async function refreshStatus(forceSubs) {
   try {
-    const st = await api('cgi-bin/status.sh');
+    const st = await api('api/status');
     state.status = st;
     renderOverview(st);
     renderTraffic(st.traffic);
@@ -327,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
     start();
   } else {
     // 未持有密钥时先探测：面板未启用密钥（PANEL_AUTH=none）则直接进入
-    api('cgi-bin/status.sh')
+    api('api/status')
       .then((st) => {
         state.status = st;
         start();

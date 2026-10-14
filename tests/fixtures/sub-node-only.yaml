@@ -1,0 +1,4 @@
+# 测试用订阅：仅含节点（模拟上游加速订阅的「仅节点」形态）
+proxies:
+  - {name: smoke-a-1, type: ss, server: 127.0.0.1, port: 24001, cipher: aes-128-gcm, password: test}
+  - {name: smoke-a-2, type: ss, server: 127.0.0.1, port: 24002, cipher: aes-128-gcm, password: test}

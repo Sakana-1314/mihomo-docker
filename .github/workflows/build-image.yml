@@ -1,0 +1,130 @@
+name: 构建镜像
+
+# 统一门禁：静态检查 → 镜像构建 → 冒烟与透明链路测试 → 推送 ghcr.io
+# PR 仅构建与验证（不推送）；main / tag 推送在验证通过后才推送镜像
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - '**/*.md'
+      - 'notes/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/sakana-1314/mihomo-docker
+  # 与 Dockerfile 中 ARG YQ_VERSION 保持一致
+  YQ_VERSION: v4.47.1
+
+jobs:
+  静态检查:
+    name: 静态检查
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck（容器脚本与面板 CGI）
+        run: |
+          command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          shellcheck --version
+          shellcheck -x -P SCRIPTDIR -s sh docker/*.sh docker/gw www/cgi-bin/*.sh
+          shellcheck -x -P SCRIPTDIR tests/*.sh
+
+      - name: 安装 yq
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: YAML 校验
+        run: bash tests/check-yaml.sh
+
+      - name: 面板脚本语法
+        run: node --check www/app.js
+
+      - name: 离线逻辑测试（配置合成 / 订阅 / 切换）
+        run: bash tests/offline.sh
+
+  镜像构建:
+    name: 镜像构建
+    needs: 静态检查
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取内核版本
+        run: echo "MIHOMO_VERSION=$(grep -m1 '^ARG MIHOMO_VERSION=' Dockerfile | cut -d= -f2)" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 生成镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=mihomo-${{ env.MIHOMO_VERSION }},enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+
+      # ---- 本地加载 amd64 镜像用于验证（验证通过后才推送）----
+      - name: 构建（本地验证用）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: local/${{ github.event.repository.name }}:verify
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 冒烟测试（面板 / 订阅自动更新 / 快捷切换 / 流量统计）
+        env:
+          IMAGE: local/${{ github.event.repository.name }}:verify
+        run: bash tests/smoke.sh
+
+      - name: 透明代理链路测试（netns 真实转发）
+        env:
+          IMAGE: local/${{ github.event.repository.name }}:verify
+        run: bash tests/transparent-e2e.sh
+
+      # ---- 验证通过后推送多架构镜像 ----
+      - name: 构建并推送（多架构）
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+      - name: 校验推送结果
+        if: github.event_name != 'pull_request'
+        run: |
+          for tag in $(echo "${{ steps.meta.outputs.tags }}" | head -n2); do
+            echo "--- $tag"
+            docker buildx imagetools inspect "$tag"
+          done

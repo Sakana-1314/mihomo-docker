@@ -1,0 +1,12 @@
+# 测试用订阅：完整配置（自带策略组与规则）
+proxies:
+  - {name: smoke-b-1, type: ss, server: 127.0.0.1, port: 24101, cipher: aes-128-gcm, password: test}
+proxy-groups:
+  - name: SMOKE-PROFILE-GROUP
+    type: select
+    proxies:
+      - smoke-b-1
+      - DIRECT
+rules:
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - MATCH,SMOKE-PROFILE-GROUP

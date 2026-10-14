@@ -1,0 +1,49 @@
+# =============================================================================
+# 米哈游 API 加速网关 · macvlan 透明网关部署示例
+#
+# 前置条件：
+#   1. 宿主机网卡支持 macvlan（有线网卡；多数无线网卡不支持）
+#   2. 在宿主机创建 macvlan 网络（按实际网段调整；容器 IP 不可与路由器 DHCP 池冲突）：
+#        docker network create -d macvlan \
+#          --subnet=192.168.1.0/24 --gateway=192.168.1.1 \
+#          -o parent=eth0 -o macvlan_mode=bridge mihomo_gw
+#   3. 启动：docker compose -f examples/docker-compose.macvlan.yml up -d
+#   4. 将需要使用网关的设备（或路由器 DHCP 配置）的「默认网关 + DNS」指向容器地址
+#
+# 提示：Linux 下宿主机自身无法直接访问 macvlan 容器（macvlan 设计限制），
+#       局域网内其它设备访问不受影响；若需宿主机访问，可为宿主机另建一个 macvlan 子接口。
+# =============================================================================
+
+services:
+  mihomo-docker:
+    image: ghcr.io/sakana-1314/mihomo-docker:latest
+    container_name: mihomo-docker
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      # 透明代理模式：tproxy（推荐，TCP+UDP 全量）/ redir（仅 TCP）/ off
+      TRANSPARENT_MODE: tproxy
+      # IPv6 策略：block（默认，阻断转发避免绕过）/ proxy（透明代理，尽力而为）/ pass（直通）
+      IPV6_MODE: block
+      # 访问密钥（管理面板与内核 API 共用；留空则自动生成并打印在容器日志中）
+      # SECRET: "请替换为自定义密钥"
+      # 上游订阅自动更新间隔（秒，0 表示关闭，默认 21600）
+      # SUB_UPDATE_INTERVAL: "21600"
+      # 额外放行网段（逗号分隔，这些目标地址不会被透明代理接管）
+      # BYPASS_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10"
+    volumes:
+      - ./data:/data
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.rp_filter=0
+      - net.ipv4.conf.default.rp_filter=0
+    networks:
+      mihomo_gw:
+        ipv4_address: 192.168.1.250
+
+networks:
+  mihomo_gw:
+    external: true
+    name: mihomo_gw

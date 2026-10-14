@@ -138,6 +138,9 @@ assert_eq "面板脚本可访问" "200" "$code"
 code=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$PANEL/api/status" || true)
 assert_eq "未携带密钥返回 401" "401" "$code"
 
+KVER=$(gw_exec cat /usr/share/gw/kernel-version 2>/dev/null || true)
+if [ -n "$KVER" ]; then ok "镜像记录内核版本（$KVER）"; else bad "镜像缺少内核版本记录"; fi
+
 # ---------------------------------------------------------------- 订阅自动拉取
 step "订阅自动拉取与激活"
 STATUS=$(panel /api/status)

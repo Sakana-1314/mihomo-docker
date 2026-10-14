@@ -13,12 +13,13 @@ ENV GOPROXY="https://proxy.golang.org|https://goproxy.cn|direct"
 RUN apk add --no-cache git
 WORKDIR /src
 
-COPY go.mod go.sum ./
+COPY . .
+# 先复制源码再拉取内核版本：避免后续 COPY 覆盖掉 go.mod/go.sum 中解析出的 Meta 分支版本
 RUN --mount=type=cache,target=/go/pkg/mod \
     go get "github.com/metacubex/mihomo@${MIHOMO_REF}" \
- && go mod tidy
+ && go mod tidy \
+ && go list -m -f 'kernel: {{.Path}} {{.Version}}' github.com/metacubex/mihomo
 
-COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     mkdir -p /out \
@@ -60,6 +61,7 @@ RUN apk add --no-cache ca-certificates tzdata iproute2 iptables iptables-legacy 
  && command -v ip6tables >/dev/null 2>&1
 
 COPY --from=builder /out/gw /usr/local/bin/gw
+COPY --from=builder /out/kernel-version /usr/share/gw/kernel-version
 COPY --from=assets /out/ui /usr/share/gw/ui
 COPY --from=assets /out/geo /usr/share/gw/geo
 COPY --from=assets /out/licenses /usr/share/licenses

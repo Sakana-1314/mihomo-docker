@@ -9,3 +9,6 @@ docs
 *.md
 data
 logs
+gw
+gw.exe
+coverage.out

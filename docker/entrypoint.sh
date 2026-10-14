@@ -63,7 +63,7 @@ SCHED_PID=$!
 
 gw_log "管理面板：http://<网关IP>:$PANEL_PORT/  |  完整面板：http://<网关IP>:$CONTROLLER_PORT/ui/  |  混合端口：$MIXED_PORT"
 
-# shellcheck disable=SC2329  # 由 trap 调用
+# shellcheck disable=SC2317,SC2329  # 由 trap 调用（旧版 shellcheck 报 SC2317，新版报 SC2329）
 _shutdown() {
   gw_log "收到退出信号，正在停止服务…"
   kill "$SCHED_PID" "$HTTPD_PID" "$MI_PID" 2>/dev/null

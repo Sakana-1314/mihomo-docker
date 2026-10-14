@@ -31,8 +31,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck（容器脚本与面板 CGI）
+        env:
+          # 固定 shellcheck 版本，避免 runner 预装版本差异造成误报
+          SC_VERSION: v0.11.0
         run: |
-          command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          if curl -fsSL -o /tmp/shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/${SC_VERSION}/shellcheck-${SC_VERSION}.linux.x86_64.tar.xz"; then
+            sudo tar -xJf /tmp/shellcheck.tar.xz -C /usr/local/bin --strip-components=1 "shellcheck-${SC_VERSION}/shellcheck"
+          else
+            echo "固定版本下载失败，回退使用系统 shellcheck"
+            command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          fi
           shellcheck --version
           shellcheck -x -P SCRIPTDIR -s sh docker/*.sh docker/gw www/cgi-bin/*.sh
           shellcheck -x -P SCRIPTDIR tests/*.sh

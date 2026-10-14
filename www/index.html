@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>米哈游 API 加速网关</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⛩️</span>
+      <div>
+        <h1>米哈游 API 加速网关</h1>
+        <p class="sub" id="brand-sub">mihomo-docker · 透明网关控制台</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="badge" id="kernel-badge">内核：-</span>
+      <span class="badge" id="fw-badge">透明代理：-</span>
+    </div>
+  </header>
+
+  <section class="card auth hidden" id="auth-card">
+    <h2>访问密钥</h2>
+    <p class="hint">请输入容器日志或环境变量 <code>SECRET</code> 中的访问密钥（管理面板与内核 API 共用）。</p>
+    <div class="row">
+      <input id="token-input" type="password" placeholder="访问密钥" autocomplete="current-password">
+      <button class="primary" id="token-save">进入面板</button>
+    </div>
+    <p class="hint error hidden" id="token-error">访问密钥不正确</p>
+  </section>
+
+  <main id="main" class="hidden">
+    <section class="card">
+      <div class="card-head">
+        <h2>运行概览</h2>
+        <button class="ghost" id="refresh-overview">刷新</button>
+      </div>
+      <div class="grid" id="overview"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>流量统计</h2>
+        <span class="hint" id="traffic-updated">-</span>
+      </div>
+      <div class="traffic">
+        <div class="metric">
+          <span class="metric-label">累计下载</span>
+          <span class="metric-value" id="t-down-total">-</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">累计上传</span>
+          <span class="metric-value" id="t-up-total">-</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">实时下行</span>
+          <span class="metric-value accent" id="t-down-speed">-</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">实时上行</span>
+          <span class="metric-value accent" id="t-up-speed">-</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">活动连接</span>
+          <span class="metric-value" id="t-conns">-</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">内核内存</span>
+          <span class="metric-value" id="t-memory">-</span>
+        </div>
+      </div>
+      <p class="hint">数据来自内核自带接口（<code>/connections</code>、<code>/memory</code>），每 2 秒刷新。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>上游订阅</h2>
+        <div class="row">
+          <button class="ghost" id="subs-refresh">刷新</button>
+          <button class="primary" id="subs-update-all">全部更新</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="subs-table">
+          <thead>
+            <tr><th>名称</th><th>类型</th><th>节点</th><th>上次更新</th><th>状态</th><th class="right">操作</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <details class="adder">
+        <summary>新增订阅</summary>
+        <div class="form-grid">
+          <input id="add-name" placeholder="名称（字母数字 . _ -）">
+          <input id="add-url" placeholder="订阅地址（https://…）">
+          <select id="add-type">
+            <option value="auto">自动识别</option>
+            <option value="proxies">仅节点（可热更新）</option>
+            <option value="profile">完整配置（含规则）</option>
+          </select>
+          <button class="primary" id="add-submit">添加并拉取</button>
+        </div>
+      </details>
+      <p class="hint" id="subs-message"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>策略组与节点</h2>
+        <button class="ghost" id="nodes-refresh">刷新</button>
+      </div>
+      <div class="row">
+        <select id="group-select"></select>
+        <span class="hint" id="group-now"></span>
+      </div>
+      <div class="nodes" id="nodes-grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>面板与密钥</h2>
+      </div>
+      <div class="grid">
+        <div class="kv"><span>本面板</span><a id="panel-link" href="#" target="_blank">-</a></div>
+        <div class="kv"><span>完整面板（MetaCubeXD）</span><a id="dash-link" href="#" target="_blank">-</a></div>
+        <div class="kv"><span>内核 API</span><code id="api-addr">-</code></div>
+        <div class="kv">
+          <span>访问密钥</span>
+          <span class="row">
+            <code id="secret-text">（未启用）</code>
+            <button class="ghost" id="secret-toggle">显示</button>
+            <button class="ghost" id="secret-copy">复制</button>
+          </span>
+        </div>
+      </div>
+      <p class="hint">在完整面板中把后端地址填为内核 API 地址，密钥填上面的访问密钥，即可查看完整连接列表、规则命中与历史曲线。</p>
+      <p class="hint">命令行：<code>docker exec &lt;容器&gt; gw status</code> / <code>gw switch &lt;订阅名&gt;</code> / <code>gw update all</code></p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>mihomo-docker · 管理面板</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

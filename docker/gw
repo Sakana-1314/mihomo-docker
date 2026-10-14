@@ -1,0 +1,32 @@
+#!/bin/sh
+# =============================================================================
+# 米哈游 API 加速网关 · 命令行入口
+#   gw status            运行状态与流量统计
+#   gw logs              输出一次流量摘要日志
+#   gw subs              订阅列表
+#   gw switch <名称>     快捷切换订阅（baseline 表示空载基线）
+#   gw update [名称|all] 立即更新订阅（默认 all）
+#   gw add <名称> <URL> [auto|proxies|profile]
+#   gw del <名称>
+#   gw firewall setup|cleanup|status
+#   gw restart           重启内核（守护进程自动拉起）
+#   gw env               查看当前生效的环境变量
+# =============================================================================
+GW_APP_DIR="${GW_APP_DIR:-/app/docker}"
+
+case "${1:-help}" in
+  status)   exec sh "$GW_APP_DIR/stats.sh" status ;;
+  logs)     exec sh "$GW_APP_DIR/stats.sh" log ;;
+  subs)     exec sh "$GW_APP_DIR/subs.sh" list ;;
+  switch)   shift; exec sh "$GW_APP_DIR/switch.sh" "$@" ;;
+  update)   shift; exec sh "$GW_APP_DIR/subs.sh" update "${1:-all}" ;;
+  add)      shift; exec sh "$GW_APP_DIR/subs.sh" add "$@" ;;
+  del)      shift; exec sh "$GW_APP_DIR/subs.sh" del "$@" ;;
+  firewall) shift; exec sh "$GW_APP_DIR/firewall.sh" "${1:-setup}" ;;
+  restart)  exec sh "$GW_APP_DIR/restart.sh" ;;
+  env)      exec sh "$GW_APP_DIR/env.sh" show ;;
+  *)
+    sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

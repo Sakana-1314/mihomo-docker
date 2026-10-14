@@ -1,0 +1,5 @@
+# 测试用订阅：仅含节点，带更新标记节点（用于验证订阅自动更新）
+proxies:
+  - {name: smoke-a-1, type: ss, server: 127.0.0.1, port: 24001, cipher: aes-128-gcm, password: test}
+  - {name: smoke-a-2, type: ss, server: 127.0.0.1, port: 24002, cipher: aes-128-gcm, password: test}
+  - {name: smoke-a-marker, type: ss, server: 127.0.0.1, port: 24003, cipher: aes-128-gcm, password: test}

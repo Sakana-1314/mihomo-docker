@@ -1,0 +1,52 @@
+# =============================================================================
+# 米哈游 API 加速网关 · 基础骨架模板
+#
+# 随镜像分发，不建议直接修改（升级镜像会一并更新）。
+# 用途：为「仅含节点」的订阅与「未配置订阅」的空载场景提供默认策略组与基础分流。
+#
+#   - active 节点提供者：由容器脚本在切换/更新订阅时写入 ./providers/active.yaml
+#   - 需要覆盖或追加运行参数时，请编辑 /data/config/overlay.yaml（优先级高于本文件）
+#   - 需要完全自定义时，可直接使用自带策略组与规则的完整订阅
+# =============================================================================
+
+proxy-providers:
+  active:
+    type: file
+    path: ./providers/active.yaml
+    health-check:
+      enable: false
+
+proxy-groups:
+  - name: 加速节点
+    type: select
+    use:
+      - active
+    proxies:
+      - 自动测速
+      - DIRECT
+
+  - name: 自动测速
+    type: url-test
+    use:
+      - active
+    url: http://cp.cloudflare.com/generate_204
+    interval: 300
+    tolerance: 50
+    lazy: true
+
+  - name: 直连
+    type: select
+    proxies:
+      - DIRECT
+      - 自动测速
+
+rules:
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
+  - GEOIP,CN,DIRECT
+  - MATCH,加速节点

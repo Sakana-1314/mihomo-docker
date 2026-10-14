@@ -1,0 +1,19 @@
+# =============================================================================
+# 米哈游 API 加速网关 · 上游订阅清单
+#
+# 由容器统一管理（管理面板 / 命令行增删改查，自动定时拉取）。
+# 手动编辑本文件后，执行 `docker exec <容器> gw update all` 立即生效。
+#
+# 字段：
+#   name  必填，订阅名称（唯一，切换与展示用）
+#   url   必填，订阅地址（默认以 clash.meta UA 拉取，返回 YAML 配置）
+#   type  可选，auto | proxies | profile（默认 auto）
+#         auto     自动识别：含 proxy-groups + rules 视为完整订阅，否则仅取节点
+#         proxies  强制仅取节点：并入 active 节点提供者，切换/更新支持热生效
+#         profile  强制作为完整配置：使用订阅自带的策略组与分流规则
+# =============================================================================
+
+subscriptions: []
+#  - name: example
+#    url: https://api.example.com/v1/client/subscribe?token=xxxx
+#    type: auto

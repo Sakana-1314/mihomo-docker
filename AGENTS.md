@@ -44,9 +44,9 @@ mihomo-docker（米哈游 API 加速网关）。事实标准以代码与各目�
 
 ## 发布模型
 
-- 每天 02:00 UTC 定时拉取内核 **Meta 分支**代码构建并发布；也可用 `workflow_dispatch` 手动触发。
+- 每天 02:00 UTC 定时拉取内核 **Meta 分支**代码构建并发布；`workflow_dispatch` 手动触发与 `main` 推送同样发布，PR 只校验。
 - 版本号统一为 `dev`：镜像标签 `dev` 与 `latest` 指向同一次构建；每次先删除旧的 `dev` tag 与 release 再重建（`gh release delete dev --yes --cleanup-tag`）。
-- PR 与 `main` 推送只做校验、不发布；发布必须通过镜像构建、冒烟测试与透明链路测试。
+- 镜像内 `/usr/share/gw/kernel-version` 记录本次构建解析到的内核版本，可用于核对发布内容。
 
 ## 验证门禁
 

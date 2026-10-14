@@ -1,0 +1,78 @@
+# =============================================================================
+# 米哈游 API 加速网关 · 用户覆盖层
+#
+# 可自由编辑，优先级高于「基础骨架模板」与「完整订阅」中的同名键。
+# 合并规则（深度合并）：
+#   - 对象（映射）：递归合并，本文件的键覆盖下层同名键
+#   - 数组 / 标量：整体替换
+#   - 例：需要自定义分流规则时，直接在此写 rules: [...]（会整体替换订阅自带规则）
+#   - 例：只想改日志级别，写 log-level: debug 即可
+#
+# 注意：端口、访问密钥、控制器地址、UI 等由容器按环境变量强制注入（见 README），
+#       在本文件中修改这些键不会生效。
+# =============================================================================
+
+mode: rule
+log-level: info
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: 'off'
+global-client-fingerprint: chrome
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+  override-destination: false
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - 'Mijia Cloud'
+    - '+.push.apple.com'
+    - 'dlg.io.mi.com'
+    - 'mtalk.google.com'
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '+.lan'
+    - '+.local'
+    - 'localhost.ptlogin2.qq.com'
+    - 'localhost.sec.qq.com'
+    - '+.msftconnecttest.com'
+    - '+.msftncsi.com'
+    - 'time.*.com'
+    - 'time.*.gov'
+    - 'ntp.*.com'
+    - '+.pool.ntp.org'
+    - 'stun.*.*'
+    - 'stun.*.*.*'
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://223.5.5.5/dns-query
+    - https://1.12.12.12/dns-query
+  proxy-server-nameserver:
+    - https://223.5.5.5/dns-query
+    - https://119.29.29.29/dns-query
+  nameserver-policy:
+    'geosite:cn,private':
+      - https://223.5.5.5/dns-query
+      - https://119.29.29.29/dns-query
+    'geosite:geolocation-!cn':
+      - https://1.1.1.1/dns-query
+      - https://8.8.8.8/dns-query

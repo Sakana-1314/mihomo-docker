@@ -1,0 +1,7 @@
+# 统一按 LF 归档，避免在 Windows 上编辑后脚本出现 CRLF 导致容器内无法执行
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.gz binary
+*.tgz binary
+*.zip binary

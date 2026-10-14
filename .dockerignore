@@ -1,0 +1,11 @@
+.git
+.github
+notes
+tests
+examples
+docs
+.gitignore
+.gitattributes
+*.md
+data
+logs

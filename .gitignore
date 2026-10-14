@@ -1,0 +1,17 @@
+# 本地资料（机密文件、测试/生产服务器信息），只留本地
+notes/
+
+# 容器运行时数据（挂载目录）
+data/
+logs/
+*.log
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+*.tmp

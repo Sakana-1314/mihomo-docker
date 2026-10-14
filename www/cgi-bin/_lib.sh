@@ -25,17 +25,35 @@ cgi_ok() { # $1=JSON 文本（原样输出）
   exit 0
 }
 
-cgi_urldecode() { # $1=URL 编码字符串 → 解码（仅使用 POSIX 八进制转义，兼容 busybox）
+cgi_hex_dec() { # $1=单个十六进制字符 → 十进制（POSIX 无 base# 语法，故用查表）
+  case "${1:-}" in
+    0|1|2|3|4|5|6|7|8|9) printf '%s' "$1" ;;
+    a|A) printf '10' ;;
+    b|B) printf '11' ;;
+    c|C) printf '12' ;;
+    d|D) printf '13' ;;
+    e|E) printf '14' ;;
+    f|F) printf '15' ;;
+    *) printf '' ;;
+  esac
+}
+
+cgi_urldecode() { # $1=URL 编码字符串 → 解码（仅 POSIX 语法与八进制转义，兼容 dash/busybox）
   _s="$1"; _out=''
   while [ -n "$_s" ]; do
     case "$_s" in
       '%'[0-9a-fA-F][0-9a-fA-F]*)
-        _hex=$(printf '%s' "$_s" | cut -c2-3)
-        _s=$(printf '%s' "$_s" | cut -c4-)
-        # 计算得到的转义序列作为 printf 格式串；16# 进制转换在 busybox ash 中由
-        # CONFIG_FEATURE_SH_MATH_BASE 提供（Alpine 默认启用）
-        # shellcheck disable=SC2059,SC3052
-        _out="$_out$(printf "\\$(printf '%03o' "$((16#$_hex))")")"
+        _hi=$(cgi_hex_dec "$(printf '%s' "$_s" | cut -c2)")
+        _lo=$(cgi_hex_dec "$(printf '%s' "$_s" | cut -c3)")
+        if [ -n "$_hi" ] && [ -n "$_lo" ]; then
+          _s=$(printf '%s' "$_s" | cut -c4-)
+          # 运行时拼装的八进制转义作为 printf 格式串（\ooo 为 POSIX 定义）
+          # shellcheck disable=SC2059
+          _out="$_out$(printf "\\$(printf '%03o' "$((_hi * 16 + _lo))")")"
+          continue
+        fi
+        _out="$_out%"
+        _s=$(printf '%s' "$_s" | cut -c2-)
         ;;
       '+'*)
         _out="$_out "

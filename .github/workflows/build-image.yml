@@ -6,9 +6,6 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-    paths-ignore:
-      - '**/*.md'
-      - 'notes/**'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -27,7 +24,7 @@ env:
   YQ_VERSION: v4.47.1
 
 jobs:
-  静态检查:
+  lint:
     name: 静态检查
     runs-on: ubuntu-24.04
     steps:
@@ -55,9 +52,9 @@ jobs:
       - name: 离线逻辑测试（配置合成 / 订阅 / 切换）
         run: bash tests/offline.sh
 
-  镜像构建:
+  image:
     name: 镜像构建
-    needs: 静态检查
+    needs: lint
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

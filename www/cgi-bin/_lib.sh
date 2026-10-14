@@ -25,18 +25,26 @@ cgi_ok() { # $1=JSON 文本（原样输出）
   exit 0
 }
 
-cgi_urldecode() {
-  printf '%b' "$(printf '%s' "$1" | sed -e 's/+/ /g' -e 's/%\([0-9a-fA-F][0-9a-fA-F]\)/\\x\1/g')"
-}
-
-cgi_urlencode() {
+cgi_urldecode() { # $1=URL 编码字符串 → 解码（仅使用 POSIX 八进制转义，兼容 busybox）
   _s="$1"; _out=''
   while [ -n "$_s" ]; do
-    _c=$(printf '%s' "$_s" | cut -c1)
-    _s=$(printf '%s' "$_s" | cut -c2-)
-    case "$_c" in
-      [A-Za-z0-9._~-]) _out="$_out$_c" ;;
-      *) _out="$_out$(printf '%s' "$_c" | od -An -tx1 -v | tr -d ' \n' | sed 's/../%&/g')" ;;
+    case "$_s" in
+      '%'[0-9a-fA-F][0-9a-fA-F]*)
+        _hex=$(printf '%s' "$_s" | cut -c2-3)
+        _s=$(printf '%s' "$_s" | cut -c4-)
+        # 计算得到的转义序列作为 printf 格式串；16# 进制转换在 busybox ash 中由
+        # CONFIG_FEATURE_SH_MATH_BASE 提供（Alpine 默认启用）
+        # shellcheck disable=SC2059,SC3052
+        _out="$_out$(printf "\\$(printf '%03o' "$((16#$_hex))")")"
+        ;;
+      '+'*)
+        _out="$_out "
+        _s=$(printf '%s' "$_s" | cut -c2-)
+        ;;
+      *)
+        _out="$_out$(printf '%s' "$_s" | cut -c1)"
+        _s=$(printf '%s' "$_s" | cut -c2-)
+        ;;
     esac
   done
   printf '%s' "$_out"
@@ -60,12 +68,16 @@ cgi_init() { # 每个 CGI 脚本开头调用一次：请求体只从 stdin 读�
   fi
 }
 
-cgi_field() { # $1=键 → 表单体（或查询串）中的值（URL 解码）
+cgi_field_raw() { # $1=键 → 原始值（不做 URL 解码，便于直接用于 API 路径）
   _v=$(cgi_body | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1)
   if [ -z "$_v" ]; then
     _v=$(printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1)
   fi
-  cgi_urldecode "$_v"
+  printf '%s' "$_v"
+}
+
+cgi_field() { # $1=键 → 表单体（或查询串）中的值（URL 解码）
+  cgi_urldecode "$(cgi_field_raw "$1")"
 }
 
 cgi_method() { printf '%s' "${REQUEST_METHOD:-GET}"; }

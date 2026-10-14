@@ -30,14 +30,13 @@ if [ "$action" != "select" ]; then
   cgi_fail "400 Bad Request" "未知操作：$action"
 fi
 
-group=$(cgi_field group)
+group=$(cgi_field_raw group)   # 客户端已按 URL 编码提交，可直接作为 API 路径
 node=$(cgi_field node)
 [ -n "$group" ] || cgi_fail "400 Bad Request" "缺少策略组名"
 [ -n "$node" ] || cgi_fail "400 Bad Request" "缺少节点名"
 
-_enc_group=$(cgi_urlencode "$group")
 _body=$(GW_NODE="$node" yq -n -o=json -I0 '{"name": strenv(GW_NODE)}')
-if gw_api PUT "/proxies/$_enc_group" "$_body" >/dev/null 2>&1; then
-  cgi_ok '{"ok": true, "output": "已切换节点"}'
+if gw_api PUT "/proxies/$group" "$_body" >/dev/null 2>&1; then
+  cgi_ok '{"ok":true, "output": "已切换节点"}'
 fi
 cgi_fail "502 Bad Gateway" "切换失败（策略组或节点不存在）"

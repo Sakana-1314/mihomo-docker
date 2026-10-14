@@ -212,6 +212,11 @@ BAD_OUT=$(REQUEST_METHOD=POST CONTENT_LENGTH=${#BODY} QUERY_STRING="token=testse
   sh -c "printf '%s' '$BODY' | sh '$ROOT/www/cgi-bin/subs.sh'")
 assert_contains "缺少订阅名时拒绝执行" "$BAD_OUT" '"ok":false'
 
+# URL 解码（UTF-8 与加号）回归：仅使用八进制转义，兼容 busybox printf
+URLOUT=$(GW_DATA_DIR="$DATA" GW_APP_DIR="$ROOT/docker" GW_SHARE_DIR="$ROOT" GW_WWW_DIR="$ROOT/www" \
+  sh -c ". '$ROOT/www/cgi-bin/_lib.sh' 2>/dev/null; cgi_urldecode '%E5%8A%A0%E9%80%9F%E8%8A%82%E7%82%B9+demo'")
+assert_eq "面板 URL 解码（UTF-8 与加号）" "加速节点 demo" "$URLOUT"
+
 # ---------------------------------------------------------------- 10. CLI
 step "10. 命令行入口"
 LIST_OUT=$(gw_cli subs)

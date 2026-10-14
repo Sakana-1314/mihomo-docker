@@ -8,23 +8,25 @@ mihomo-docker（米哈游 API 加速网关）。事实标准以代码与各目�
 
 ## 定位口径
 
-本仓库对外定位为「基于米哈游 API 的容器化网络加速网关」，所有文档、注释、提交信息、镜像描述一律沿用该口径：
+本仓库对外定位为「基于米哈游 API 的容器化网络加速网关」，所有对外文案一律沿用该口径：
 
 - 不引入与该定位无关的用途描述或第三方项目叙事。
 - 技术术语（透明网关、上游订阅、分流、流量统计）按事实描述，不臆造功能。
-- 面向用户可见的文案（README、面板、启动日志首行、镜像 DESCRIPTION）保持同一口径。
+- 面向用户可见的文案（面板、启动日志、镜像 DESCRIPTION）保持同一口径；`README.md` 只保留一句话。
 
 ## 目录
 
-- `Dockerfile` - 镜像构建（多阶段：内核编译 → 面板与地理数据资产 → 运行时）
-- `docker/` - 容器入口与运行时脚本（POSIX sh，需兼容 busybox ash，勿用 bash 专有语法）
-- `config/` - 配置模板（`template.yaml` 骨架、`overlay.yaml` 覆盖层、`subscriptions.yaml` 订阅清单）
-- `www/` - 内置管理面板（静态页 + `cgi-bin/` CGI 接口）
-- `tests/` - 离线逻辑测试、镜像冒烟测试、透明链路测试
+- `main.go` - 单一入口：无参数启动守护进程，带参数进入命令行
+- `internal/kernel/` - 内核库级调用（启动 / 热加载 / 停止、统计、策略组与节点）
+- `internal/gateway/` - 编排：运行期配置、配置合成、订阅管理、定时任务；`assets/config/` 为内置配置骨架
+- `internal/firewall/` - 透明代理规则（iptables + 策略路由；规则生成与执行分离以便单测）
+- `internal/panel/` - 管理面板（同源静态页 + JSON 接口，静态资源编译进二进制）
+- `internal/cli/`、`internal/out/`、`internal/settings/` - 命令行客户端、日志输出、运行期配置
+- `tests/` - 容器级测试（冒烟、透明链路）；Go 单测与被测包同目录
 - `examples/` - 部署示例（macvlan 透明网关、普通网桥）
 - `.github/workflows/` - CI/CD 工作流
 
-根目录只放 `AGENTS.md`、`LICENSE`、`README.md`、`Dockerfile`、`.gitignore`、`.gitattributes`、`.dockerignore`；其余文档与脚本放进所属目录内部。
+根目录只放 `AGENTS.md`、`LICENSE`、`README.md`、`Dockerfile`、`go.mod`、`go.sum`、`main.go`、`.gitignore`、`.gitattributes`、`.dockerignore`；其余代码与文档放进所属目录内部。
 
 ## notes
 
@@ -36,28 +38,27 @@ mihomo-docker（米哈游 API 加速网关）。事实标准以代码与各目�
 ## 协作与提交
 
 - 作者与提交者统一为 `Sakana <admin@yangrucheng.top>`。
-- 必须走 PR：`gh pr create` → 等 `构建镜像` 工作流三道门禁全绿 → `gh pr merge --squash` 并删除 head 分支；禁止本地 merge 后直推 `main`（会把 PR 关成 CLOSED 而非 MERGED）。
+- 必须走 PR：`gh pr create` → 等 `构建镜像` 工作流全绿 → `gh pr merge --squash` 并删除 head 分支；禁止本地 merge 后直推 `main`。
 - 分支前缀 `feat/`、`fix/`、`refactor/`、`docs/`、`chore/`；提交信息中文，格式 `type(scope): 描述`。
 - 工作流 `name` 用中文（专有名词除外）；严禁硬编码 IP、密钥与内部域名，一律 `${{ secrets.* }}` 或示例占位。
 
+## 发布模型
+
+- 每天 02:00 UTC 定时拉取内核 **Meta 分支**代码构建并发布；也可用 `workflow_dispatch` 手动触发。
+- 版本号统一为 `dev`：镜像标签 `dev` 与 `latest` 指向同一次构建；每次先删除旧的 `dev` tag 与 release 再重建（`gh release delete dev --yes --cleanup-tag`）。
+- PR 与 `main` 推送只做校验、不发布；发布必须通过镜像构建、冒烟测试与透明链路测试。
+
 ## 验证门禁
 
-- 所有改动必须通过 `构建镜像` 工作流：`静态检查`（shellcheck + YAML 校验 + 面板脚本语法 + 离线逻辑测试）→ `镜像构建` → `冒烟测试` 与 `透明链路测试`；**验证通过后才推送镜像**。
-- 内核与资产版本固定在 `Dockerfile` 的 `ARG MIHOMO_VERSION` / `ARG METACUBEXD_VERSION` / `ARG YQ_VERSION`，升级走独立 PR。
-- 涉及 `docker/`、`config/`、`www/` 的行为变更，必须在 `tests/` 中补充或更新断言（优先写进离线测试；需要内核或转发能力时补到 `tests/smoke.sh`、`tests/transparent-e2e.sh`）。
-- 本地自检：
-
-```bash
-shellcheck -s sh docker/*.sh docker/gw www/cgi-bin/*.sh
-shellcheck tests/*.sh
-bash tests/check-yaml.sh
-bash tests/offline.sh
-```
+- `lint`：`gofmt -l .`、`go vet -tags with_gvisor ./...`、`go test -tags with_gvisor ./...`、`shellcheck tests/*.sh`、`node --check internal/panel/static/app.js`。
+- `image`：构建 → `tests/smoke.sh` → `tests/transparent-e2e.sh` → 通过后才推送镜像并刷新 `dev`。
+- 行为变更必须补测试：优先 Go 单测（不得依赖网络、Docker 或 Linux 专属能力），必要时补容器级测试。
 
 ## 实现约束（改动前必读）
 
-- 跨脚本复用的函数（含订阅元数据读取）一律放 `docker/lib.sh`，不要跨脚本调用未定义函数；环境变量与路径常量同样集中在 `lib.sh`。
-- yq 表达式：flow 映射的键必须加引号（如 `{"name": .key}`），否则本仓库固定的 yq 版本会报词法错误。
-- 透明代理（`tproxy` 模式）依赖：`ip rule fwmark 0x1 → table 100`、`ip route local default dev lo table 100`、`net.ipv4.ip_forward=1`、`rp_filter=0`；只有具备全局地址的接口才会下发规则，新增接口后需重新执行 `gw firewall setup`。
-- 内核配置合成顺序为「骨架模板或订阅 → `overlay.yaml` → `runtime.yaml`」，后合并者优先；数组整体替换、对象递归合并。运行时注入项（端口/密钥/控制器/UI）由环境变量生成，用户不可在 `overlay.yaml` 中覆盖。
-- 切换订阅前必须先通过内核配置校验（`mihomo -t`），校验失败不得替换现行配置。
+- 内核以**库**的形式在同进程内运行：启动用 `hub.Parse`，热加载用 `executor.ParseWithBytes` + `hub.ApplyConfig`，流量统计读 `tunnel/statistic`，策略组读 `tunnel.Proxies()`、切换节点用 `adapter/outboundgroup.SelectAble`。运行期不依赖子进程与外部配置工具（yq / jq / curl / httpd 均不参与）。
+- 内核工作目录与配置路径必须是绝对路径（`constant.SetHomeDir` / `constant.SetConfig`），否则内核的默认配置会落到进程当前目录。
+- 配置合成顺序为「骨架模板或完整订阅 → `/data/config/overlay.yaml` → 运行期注入项」；运行期注入项由环境变量生成且优先级最高；合成结果先经内核校验（`Validate`）再生效，校验失败不落盘。
+- 透明代理：`tproxy` 模式依赖 `ip rule fwmark 0x1 → table 100` 与 `ip route local default dev lo table 100`；只有具备全局地址的接口才会下发规则，新增接口后重新执行 `gw firewall reload`。
+- 面板与内核 API 共用同一个密钥：`X-Panel-Token` 头或 `?token=` 查询参数鉴权，`PANEL_AUTH=none` 可关闭；`/api/health` 不需要密钥（供健康检查）。
+- 命令行与守护进程是同一个二进制：无参数即守护进程，带参数即命令行客户端（经面板接口访问守护进程）。

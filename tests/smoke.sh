@@ -190,6 +190,16 @@ DEL=$(panel_post 'action=del&name=sub-c')
 assert_ok_json "面板删除订阅" "$DEL"
 assert_eq "删除后剩余订阅数" "2" "$(panel /cgi-bin/subs.sh 2>/dev/null | jq_in '.total')"
 
+# ---------------------------------------------------------------- 策略组接口
+step "策略组与节点接口"
+GROUPS_JSON=$(panel /cgi-bin/nodes.sh || true)
+assert_contains "策略组接口返回数据" "$GROUPS_JSON" '"groups"'
+assert_contains "策略组接口返回当前选中节点" "$GROUPS_JSON" '"now"'
+NODE_SEL=$(gw_exec curl -sS -m 30 -X POST -H "X-Panel-Token: $SECRET" \
+  --data "action=select&group=%E5%8A%A0%E9%80%9F%E8%8A%82%E7%82%B9&node=smoke-a-marker" \
+  "http://127.0.0.1:8080/cgi-bin/nodes.sh" 2>&1 || true)
+assert_contains "节点切换接口可用" "$NODE_SEL" '"ok":true'
+
 # ---------------------------------------------------------------- 流量统计
 step "流量统计（内核自带接口的呈现）"
 BEFORE=$(api /connections 2>/dev/null | jq_in '.downloadTotal' || true)

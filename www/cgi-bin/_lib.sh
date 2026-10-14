@@ -80,16 +80,16 @@ cgi_require_auth() {
   cgi_fail "401 Unauthorized" "访问密钥不正确"
 }
 
-cgi_run() { # 其余参数为命令：执行并输出 {ok, output}
+cgi_run() { # 其余参数为命令：执行并输出完整响应 {ok, output}
   _out=$("$@" 2>&1)
   _rc=$?
   _json=$(GW_OUT="$_out" GW_RC="$_rc" \
     yq -n -o=json -I0 '{"ok": (strenv(GW_RC) == "0"), "output": strenv(GW_OUT)}' 2>/dev/null) || _json=''
   [ -n "$_json" ] || _json=$(GW_OUT="$_out" yq -n -o=json -I0 '{"ok": false, "output": strenv(GW_OUT)}' 2>/dev/null) || _json='{"ok":false,"error":"响应生成失败"}'
-  printf '%s' "$_json"
+  cgi_ok "$_json"
 }
 
-cgi_run_then_subs() { # 执行命令并附带最新订阅清单
+cgi_run_then_subs() { # 执行命令并附带最新订阅清单（同样输出完整响应）
   _out=$("$@" 2>&1)
   _rc=$?
   _subs=$(sh "$GW_APP_DIR/subs.sh" json 2>/dev/null || true)
@@ -104,5 +104,5 @@ cgi_run_then_subs() { # 执行命令并附带最新订阅清单
       yq -n -o=json -I0 '{"ok": (strenv(GW_RC) == "0"), "output": strenv(GW_OUT)}' 2>/dev/null) || _json=''
   fi
   [ -n "$_json" ] || _json='{"ok":false,"error":"响应生成失败"}'
-  printf '%s' "$_json"
+  cgi_ok "$_json"
 }

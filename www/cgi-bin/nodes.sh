@@ -14,14 +14,15 @@ if [ "$(cgi_method)" = "GET" ]; then
   if [ -z "$_proxies" ]; then
     cgi_ok '{"ok":false,"error":"内核未就绪","groups":[]}'
   fi
-  printf '%s' "$_proxies" | yq -p=json -o=json -I0 '
+  _groups=$(printf '%s' "$_proxies" | yq -p=json -o=json -I0 '
     {
       "ok": true,
       "groups": (.proxies | to_entries
         | map(select(.value.all != null and .key != "GLOBAL")
         | {"name": .key, "type": (.value.type // ""), "now": (.value.now // ""), "nodes": (.value.all // [])}))
-    }' -
-  exit 0
+    }' - 2>/dev/null) || _groups=''
+  [ -n "$_groups" ] || _groups='{"ok":false,"error":"策略组解析失败","groups":[]}'
+  cgi_ok "$_groups"
 fi
 
 action=$(cgi_field action)

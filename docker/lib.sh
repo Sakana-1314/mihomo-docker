@@ -131,19 +131,46 @@ gw_profile_nodes() { # $1=名称 → 节点数量
   yq -r '(.proxies // []) | length' "$GW_PROFILES_DIR/$1.yaml" 2>/dev/null | head -n1 || printf '0'
 }
 
-# ---- 下载（优先经内核链路，失败回退直连）----
+# ---- 下载（公网目标优先经内核链路，内网/单标签主机优先直连；双向回退）----
 gw_download() { # $1=url $2=目标文件
   _url="$1"; _out="$2"
   _ua="${SUB_USER_AGENT:-clash.meta}"
   _timeout="${SUB_TIMEOUT:-30}"
-  if [ "${SUB_VIA_PROXY:-1}" = "1" ] && gw_kernel_alive; then
+  _host=$(printf '%s' "$_url" | sed -e 's|^[A-Za-z][A-Za-z0-9+.-]*://||' -e 's|^[^/]*@||' -e 's|[:/?].*$||')
+
+  # 单标签主机名（容器/内网服务名）与私有地址优先直连：
+  # 这类目标在分流规则中可能被判定为代理流量，直连更符合预期
+  _prefer_direct=0
+  case "$_host" in
+    ''|*.*) ;;
+    *) _prefer_direct=1 ;;
+  esac
+  case "$_host" in
+    10.*|127.*|192.168.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) _prefer_direct=1 ;;
+  esac
+
+  _via_proxy=0
+  if [ "${SUB_VIA_PROXY:-1}" = "1" ] && gw_kernel_alive; then _via_proxy=1; fi
+
+  if [ "$_prefer_direct" = "0" ] && [ "$_via_proxy" = "1" ]; then
     if curl -fsSL --max-time "$_timeout" -A "$_ua" \
         -x "http://127.0.0.1:${MIXED_PORT:-7890}" "$_url" -o "$_out" 2>/dev/null; then
       return 0
     fi
     gw_warn "经内核链路下载失败，回退直连：$_url"
   fi
-  curl -fsSL --max-time "$_timeout" --retry 2 --retry-delay 1 -A "$_ua" "$_url" -o "$_out"
+
+  if curl -fsSL --max-time "$_timeout" --retry 2 --retry-delay 1 -A "$_ua" "$_url" -o "$_out"; then
+    return 0
+  fi
+
+  if [ "$_prefer_direct" = "1" ] && [ "$_via_proxy" = "1" ]; then
+    gw_log "直连下载失败，改经内核链路重试：$_url"
+    curl -fsSL --max-time "$_timeout" -A "$_ua" \
+      -x "http://127.0.0.1:${MIXED_PORT:-7890}" "$_url" -o "$_out"
+    return $?
+  fi
+  return 1
 }
 
 # ---- 数值校验 ----

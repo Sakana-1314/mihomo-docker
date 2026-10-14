@@ -151,22 +151,26 @@ cmd_list() {
   done
 }
 
-cmd_json() { # 面板用：订阅清单 JSON
+cmd_json() { # 面板用：订阅清单 JSON（保证 each 元素都是合法对象）
   _active=$(gw_state_get active)
   _items=''
   _total=0
   for _n in $(gw_subs_names); do
     _total=$((_total + 1))
+    _obj=''
     _st="$GW_SUBS_STATE_DIR/$_n.json"
     if [ -f "$_st" ]; then
-      _items="$_items$(yq -o=json -I0 '.' "$_st" 2>/dev/null),"
-    else
-      _items="$_items$(GW_SN="$_n" GW_SURL="$(gw_subs_url "$_n")" GW_STYPE="$(gw_subs_type "$_n")" \
-        yq -n -o=json -I0 '{"name": strenv(GW_SN), "url": strenv(GW_SURL), "type": strenv(GW_STYPE), "status": "pending", "nodes": 0, "sha256": "", "updated_at": "", "error": ""}'),"
+      _obj=$(yq -o=json -I0 '.' "$_st" 2>/dev/null || true)
     fi
+    case "$_obj" in
+      '{'*) ;;
+      *) _obj=$(GW_SN="$_n" GW_SURL="$(gw_subs_url "$_n")" GW_STYPE="$(gw_subs_type "$_n")" \
+           yq -n -o=json -I0 '{"name": strenv(GW_SN), "url": strenv(GW_SURL), "type": strenv(GW_STYPE), "status": "pending", "nodes": 0, "sha256": "", "updated_at": "", "error": ""}' 2>/dev/null || printf '{}') ;;
+    esac
+    _items="$_items$_obj,"
   done
   _items=${_items%,}
-  _active_json=$(GW_V="$_active" yq -n -o=json -I0 'strenv(GW_V)')
+  _active_json=$(GW_V="$_active" yq -n -o=json -I0 'strenv(GW_V)' 2>/dev/null || printf '""')
   GW_ITEMS="[$_items]" GW_ACTIVE="$_active_json" GW_TOTAL="$_total" \
     yq -n -o=json -I0 '{"active": (strenv(GW_ACTIVE) | from_json), "total": (strenv(GW_TOTAL) | tonumber), "items": (strenv(GW_ITEMS) | from_json)}'
 }

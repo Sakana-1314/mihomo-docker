@@ -6,6 +6,7 @@ _cgi_dir=$(dirname "$0" 2>/dev/null || printf '/www/cgi-bin')
 # shellcheck source=_lib.sh
 . "$_cgi_dir/_lib.sh"
 
+cgi_init
 cgi_require_auth
 
 if [ "$(cgi_method)" = "GET" ]; then
@@ -23,13 +24,13 @@ if [ "$(cgi_method)" = "GET" ]; then
   exit 0
 fi
 
-action=$(cgi_body_get action)
+action=$(cgi_field action)
 if [ "$action" != "select" ]; then
   cgi_fail "400 Bad Request" "未知操作：$action"
 fi
 
-group=$(cgi_body_get group)
-node=$(cgi_body_get node)
+group=$(cgi_field group)
+node=$(cgi_field node)
 [ -n "$group" ] || cgi_fail "400 Bad Request" "缺少策略组名"
 [ -n "$node" ] || cgi_fail "400 Bad Request" "缺少节点名"
 

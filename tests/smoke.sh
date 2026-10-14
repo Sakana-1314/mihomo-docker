@@ -37,6 +37,14 @@ assert_eq() { # 描述 期望 实际
   if [ "$2" = "$3" ]; then ok "$1"; else bad "$1（期望 [$2]，实际 [$3]）"; fi
 }
 
+assert_ok_json() { # 描述 响应（失败时输出响应片段，便于排查）
+  if printf '%s' "$2" | grep -qF '"ok":true'; then
+    ok "$1"
+  else
+    bad "$1（响应：$(printf '%s' "$2" | tr '\n' ' ' | cut -c1-400)）"
+  fi
+}
+
 cleanup() {
   # 挂载目录内的文件由容器内 root 写入，需借助容器身份清理
   if [ -d "$TMP" ]; then
@@ -53,7 +61,7 @@ gw_exec() { docker exec "$GW_NAME" "$@"; }
 gw_in()   { docker exec -i "$GW_NAME" "$@"; }          # 支持标准输入
 api()     { gw_exec curl -fsS -H "Authorization: Bearer $SECRET" "http://127.0.0.1:9090$1"; }
 panel()   { gw_exec curl -fsS -H "X-Panel-Token: $SECRET" "http://127.0.0.1:8080$1"; }
-panel_post() { gw_exec curl -fsS -X POST -H "X-Panel-Token: $SECRET" --data "$1" "http://127.0.0.1:8080/cgi-bin/subs.sh"; }
+panel_post() { gw_exec curl -sS -m 90 -X POST -H "X-Panel-Token: $SECRET" --data "$1" "http://127.0.0.1:8080/cgi-bin/subs.sh" 2>&1 || true; }
 jq_in()   { gw_in yq -p=json -r "$1" - 2>/dev/null; }  # 借用容器内 yq 解析 JSON
 http_code() { gw_exec curl -sS -m 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || printf 'failed'; }
 kernel_ready() { gw_exec curl -fsS -m 5 -H "Authorization: Bearer $SECRET" http://127.0.0.1:9090/version >/dev/null 2>&1; }
@@ -145,8 +153,8 @@ assert_contains "仅节点订阅写入节点提供者" "$PROV" "smoke-a-1"
 # ---------------------------------------------------------------- 订阅自动更新
 step "订阅内容变更后更新（快捷更新 + 热生效）"
 cp "$ROOT/tests/fixtures/sub-node-only-updated.yaml" "$TMP/fixtures/sub-node-only.yaml"
-UPD=$(panel_post 'action=update&name=sub-a' || true)
-assert_contains "更新接口执行成功" "$UPD" '"ok":true'
+UPD=$(panel_post 'action=update&name=sub-a')
+assert_ok_json "更新接口执行成功" "$UPD"
 
 live=false
 for _ in $(seq 1 10); do
@@ -158,8 +166,8 @@ assert_contains "节点提供者文件已更新" "$(gw_exec cat /data/mihomo/pro
 
 # ---------------------------------------------------------------- 快捷切换
 step "快捷切换（仅节点订阅 ↔ 完整订阅）"
-SW=$(panel_post 'action=switch&name=sub-b' || true)
-assert_contains "切换接口执行成功" "$SW" '"ok":true'
+SW=$(panel_post 'action=switch&name=sub-b')
+assert_ok_json "切换接口执行成功" "$SW"
 assert_eq "活跃订阅已变更" "sub-b" "$(panel /cgi-bin/status.sh 2>/dev/null | jq_in '.active')"
 assert_contains "完整订阅配置已合成" "$(gw_exec cat /data/mihomo/config.yaml 2>/dev/null || true)" "SMOKE-PROFILE-GROUP"
 
@@ -176,10 +184,10 @@ assert_contains "切回后恢复模板规则" "$(gw_exec cat /data/mihomo/config
 
 # ---------------------------------------------------------------- 订阅增删
 step "面板订阅增删"
-ADD=$(panel_post "action=add&name=sub-c&url=http%3A%2F%2F$SUB_NAME%2Fsub-node-only.yaml&type=proxies" || true)
-assert_contains "面板新增订阅" "$ADD" '"ok":true'
-DEL=$(panel_post 'action=del&name=sub-c' || true)
-assert_contains "面板删除订阅" "$DEL" '"ok":true'
+ADD=$(panel_post "action=add&name=sub-c&url=http%3A%2F%2F$SUB_NAME%2Fsub-node-only.yaml&type=proxies")
+assert_ok_json "面板新增订阅" "$ADD"
+DEL=$(panel_post 'action=del&name=sub-c')
+assert_ok_json "面板删除订阅" "$DEL"
 assert_eq "删除后剩余订阅数" "2" "$(panel /cgi-bin/subs.sh 2>/dev/null | jq_in '.total')"
 
 # ---------------------------------------------------------------- 流量统计

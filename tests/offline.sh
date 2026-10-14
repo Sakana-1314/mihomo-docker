@@ -195,9 +195,22 @@ assert_contains "流量接口返回数据" "$TRAFFIC_OUT" '"down_total"'
 NODES_OUT=$(REQUEST_METHOD=GET QUERY_STRING="token=testsecret" sh "$ROOT/www/cgi-bin/nodes.sh")
 assert_contains "节点接口在内核离线时降级" "$NODES_OUT" '"ok":false'
 
-UPDATE_OUT=$(REQUEST_METHOD=POST CONTENT_LENGTH=20 QUERY_STRING="token=testsecret" \
-  sh -c "printf 'action=update&name=sub-a' | sh '$ROOT/www/cgi-bin/subs.sh'")
+# 表单解析回归：请求体只能读取一次（否则除首个字段外全部丢值）
+BODY='action=update&name=sub-a'
+UPDATE_OUT=$(REQUEST_METHOD=POST CONTENT_LENGTH=${#BODY} QUERY_STRING="token=testsecret" \
+  sh -c "printf '%s' '$BODY' | sh '$ROOT/www/cgi-bin/subs.sh'")
 assert_contains "订阅更新接口执行成功" "$UPDATE_OUT" '"ok":true'
+
+BODY='action=switch&name=sub-a'
+SWITCH_OUT=$(REQUEST_METHOD=POST CONTENT_LENGTH=${#BODY} QUERY_STRING="token=testsecret" \
+  sh -c "printf '%s' '$BODY' | sh '$ROOT/www/cgi-bin/subs.sh'")
+assert_contains "多字段表单动作解析正确" "$SWITCH_OUT" '"ok":true'
+assert_eq "切换后活跃订阅" "sub-a" "$(cat "$DATA/state/active")"
+
+BODY='action=switch'
+BAD_OUT=$(REQUEST_METHOD=POST CONTENT_LENGTH=${#BODY} QUERY_STRING="token=testsecret" \
+  sh -c "printf '%s' '$BODY' | sh '$ROOT/www/cgi-bin/subs.sh'")
+assert_contains "缺少订阅名时拒绝执行" "$BAD_OUT" '"ok":false'
 
 # ---------------------------------------------------------------- 10. CLI
 step "10. 命令行入口"

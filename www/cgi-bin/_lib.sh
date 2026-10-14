@@ -47,18 +47,24 @@ cgi_qs_get() { # $1=键 → 查询串中的值（URL 解码）
   cgi_urldecode "$_v"
 }
 
-cgi_body() {
+cgi_body() { printf '%s' "${CGI_BODY:-}"; }
+
+cgi_init() { # 每个 CGI 脚本开头调用一次：请求体只从 stdin 读取一次并缓存
+  CGI_BODY=''
   if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
     _len="${CONTENT_LENGTH:-0}"
     gw_is_num "$_len" || _len=0
     if [ "$_len" -gt 0 ] && [ "$_len" -le 65536 ]; then
-      head -c "$_len"
+      CGI_BODY=$(head -c "$_len")
     fi
   fi
 }
 
-cgi_body_get() { # $1=键 → 表单体中的值（URL 解码）
+cgi_field() { # $1=键 → 表单体（或查询串）中的值（URL 解码）
   _v=$(cgi_body | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1)
+  if [ -z "$_v" ]; then
+    _v=$(printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1)
+  fi
   cgi_urldecode "$_v"
 }
 
@@ -77,14 +83,26 @@ cgi_require_auth() {
 cgi_run() { # 其余参数为命令：执行并输出 {ok, output}
   _out=$("$@" 2>&1)
   _rc=$?
-  GW_OUT="$_out" GW_RC="$_rc" \
-    yq -n -o=json -I0 '{"ok": (strenv(GW_RC) == "0"), "output": strenv(GW_OUT)}'
+  _json=$(GW_OUT="$_out" GW_RC="$_rc" \
+    yq -n -o=json -I0 '{"ok": (strenv(GW_RC) == "0"), "output": strenv(GW_OUT)}' 2>/dev/null) || _json=''
+  [ -n "$_json" ] || _json=$(GW_OUT="$_out" yq -n -o=json -I0 '{"ok": false, "output": strenv(GW_OUT)}' 2>/dev/null) || _json='{"ok":false,"error":"响应生成失败"}'
+  printf '%s' "$_json"
 }
 
 cgi_run_then_subs() { # 执行命令并附带最新订阅清单
   _out=$("$@" 2>&1)
   _rc=$?
-  _subs=$(sh "$GW_APP_DIR/subs.sh" json 2>/dev/null || printf '{"active":"","total":0,"items":[]}')
-  GW_OUT="$_out" GW_RC="$_rc" GW_SUBS="$_subs" \
-    yq -n -o=json -I0 '{"ok": (strenv(GW_RC) == "0"), "output": strenv(GW_OUT), "subs": (strenv(GW_SUBS) | from_json)}'
+  _subs=$(sh "$GW_APP_DIR/subs.sh" json 2>/dev/null || true)
+  case "$_subs" in
+    '{'*) ;;
+    *) _subs='{"active":"","total":0,"items":[]}' ;;
+  esac
+  _json=$(GW_OUT="$_out" GW_RC="$_rc" GW_SUBS="$_subs" \
+    yq -n -o=json -I0 '{"ok": (strenv(GW_RC) == "0"), "output": strenv(GW_OUT), "subs": (strenv(GW_SUBS) | from_json)}' 2>/dev/null) || _json=''
+  if [ -z "$_json" ]; then
+    _json=$(GW_OUT="$_out" GW_RC="$_rc" \
+      yq -n -o=json -I0 '{"ok": (strenv(GW_RC) == "0"), "output": strenv(GW_OUT)}' 2>/dev/null) || _json=''
+  fi
+  [ -n "$_json" ] || _json='{"ok":false,"error":"响应生成失败"}'
+  printf '%s' "$_json"
 }

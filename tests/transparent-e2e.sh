@@ -19,7 +19,7 @@ VETH_GW=veth-gw0
 VETH_CL=gw-cl0
 CLIENT_IP=10.99.99.2
 GW_SIDE_IP=10.99.99.1
-MARKER="/e2e-$RANDOM$RANDOM"
+MARKER="e2e-$RANDOM$RANDOM"
 PASS=0
 FAIL=0
 
@@ -105,7 +105,7 @@ step "透明转发验证（客户端 → 网关 → 内核 → 目标服务）"
 BEFORE=$(jfield "$(panel /api/traffic)" "d['down_total']")
 [ -n "$BEFORE" ] || BEFORE=0
 sleep 1
-OUT=$(ns_exec wget -q -O /dev/null -T 20 "http://$TARGET_IP$MARKER" 2>&1 && printf 'ok' || printf 'failed')
+OUT=$(ns_exec wget -q -O /dev/null -T 20 "http://$TARGET_IP/?$MARKER" 2>&1 && printf 'ok' || printf 'failed')
 sleep 2
 AFTER=$(jfield "$(panel /api/traffic)" "d['down_total']")
 [ -n "$AFTER" ] || AFTER=0

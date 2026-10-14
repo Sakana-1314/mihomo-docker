@@ -61,12 +61,14 @@ LABEL org.opencontainers.image.title="mihomo-docker" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${MIHOMO_VERSION}"
 
-# 运行依赖：curl（订阅与 API）、iproute2（策略路由）、iptables + legacy（透明代理）、yq（配置合成）
-RUN apk add --no-cache ca-certificates tzdata curl iproute2 iptables iptables-legacy \
+# 运行依赖：curl（订阅与 API）、iproute2（策略路由）、iptables + legacy（透明代理）、
+# busybox-extras（管理面板所需 httpd），yq 随后由构建资产提供
+RUN apk add --no-cache ca-certificates tzdata curl iproute2 iptables iptables-legacy busybox-extras \
  && { command -v iptables >/dev/null 2>&1 || ln -sf "$(command -v iptables-legacy)" /usr/local/bin/iptables; } \
  && { command -v ip6tables >/dev/null 2>&1 || ln -sf "$(command -v ip6tables-legacy)" /usr/local/bin/ip6tables; } \
  && command -v iptables >/dev/null 2>&1 \
- && command -v ip6tables >/dev/null 2>&1
+ && command -v ip6tables >/dev/null 2>&1 \
+ && command -v httpd >/dev/null 2>&1
 
 WORKDIR /app
 

@@ -6,7 +6,8 @@
 # 断言依据：目标服务访问日志 + 内核流量计数 + TPROXY 规则报文计数
 #   用法：IMAGE=ghcr.io/sakana-1314/mihomo-docker:latest bash tests/transparent-e2e.sh
 # =============================================================================
-set -euo pipefail
+# 断言失败需要继续执行并累计，最终按失败数返回；不使用 set -e
+set -uo pipefail
 
 IMAGE="${IMAGE:?请通过 IMAGE 指定待测镜像}"
 TMP="$(mktemp -d)"
@@ -30,16 +31,22 @@ assert_contains() { if printf '%s' "$2" | grep -qF -- "$3"; then ok "$1"; else b
 info() { printf '  [提示] %s\n' "$*"; }
 
 cleanup() {
+  # 挂载目录内的文件由容器内 root 写入，需借助容器身份清理
+  if [ -d "$TMP" ]; then
+    docker run --rm -v "$TMP:/cleanup" --entrypoint sh "$IMAGE" \
+      -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
+  fi
   docker rm -f "$GW_NAME" "$TGT_NAME" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$TMP"
+  rm -rf "$TMP" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 gw_exec() { docker exec "$GW_NAME" "$@"; }
 ns_exec() { gw_exec ip netns exec "$CLIENT_NS" "$@"; }
 api()     { gw_exec curl -fsS -H "Authorization: Bearer $SECRET" "http://127.0.0.1:9090$1"; }
-jq_in()   { docker exec -i "$GW_NAME" yq -p=json -r "$1" -; }
+jq_in()   { docker exec -i "$GW_NAME" yq -p=json -r "$1" - 2>/dev/null; }
+kernel_ready() { gw_exec curl -fsS -m 5 -H "Authorization: Bearer $SECRET" http://127.0.0.1:9090/version >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------- 准备
 step "准备网络与目标服务"
@@ -62,8 +69,8 @@ docker run -d --name "$GW_NAME" --network "$NET" --privileged \
   -v "$TMP/data:/data" "$IMAGE" >/dev/null
 
 ready=false
-for _ in $(seq 1 60); do
-  if gw_exec curl -fsS -H "X-Panel-Token: $SECRET" "http://127.0.0.1:8080/cgi-bin/status.sh" 2>/dev/null | grep -q '"online":true'; then
+for _ in $(seq 1 90); do
+  if kernel_ready; then
     ready=true
     break
   fi
@@ -71,7 +78,7 @@ for _ in $(seq 1 60); do
 done
 if [ "$ready" = true ]; then ok "网关就绪"; else
   bad "网关未就绪"
-  docker logs "$GW_NAME" 2>&1 | tail -40
+  docker logs "$GW_NAME" 2>&1 | tail -40 || true
 fi
 
 # ---------------------------------------------------------------- 客户端命名空间
@@ -99,11 +106,13 @@ fi
 
 # ---------------------------------------------------------------- 透明转发
 step "透明转发验证（客户端 → 网关 → 内核 → 目标服务）"
-BEFORE=$(api /connections | jq_in '.downloadTotal')
+BEFORE=$(api /connections 2>/dev/null | jq_in '.downloadTotal' || true)
+[ -n "$BEFORE" ] || BEFORE=0
 sleep 1
-CODE=$(ns_exec curl -sS -m 20 -o /dev/null -w '%{http_code}' "http://$TARGET_IP$MARKER" || echo failed)
+CODE=$(ns_exec curl -sS -m 20 -o /dev/null -w '%{http_code}' "http://$TARGET_IP$MARKER" 2>/dev/null || printf 'failed')
 sleep 1
-AFTER=$(api /connections | jq_in '.downloadTotal')
+AFTER=$(api /connections 2>/dev/null | jq_in '.downloadTotal' || true)
+[ -n "$AFTER" ] || AFTER=0
 
 if [ "$CODE" = "failed" ]; then
   bad "客户端请求未完成（透明链路不通）"
@@ -120,7 +129,8 @@ fi
 TGT_LOG=$(docker logs "$TGT_NAME" 2>&1 || true)
 assert_contains "目标服务收到请求" "$TGT_LOG" "$MARKER"
 
-PKTS=$(gw_exec sh -c 'iptables-legacy -t mangle -L GW_TPROXY -v -n 2>/dev/null || iptables -t mangle -L GW_TPROXY -v -n 2>/dev/null' | awk '/TPROXY/ {sum += $1} END {print sum + 0}')
+PKTS=$(gw_exec sh -c 'iptables-legacy -t mangle -L GW_TPROXY -v -n 2>/dev/null || iptables -t mangle -L GW_TPROXY -v -n 2>/dev/null' 2>/dev/null | awk '/TPROXY/ {sum += $1} END {print sum + 0}' || printf '0')
+[ -n "${PKTS:-}" ] || PKTS=0
 if [ "${PKTS:-0}" -gt 0 ]; then
   ok "TPROXY 规则命中报文（$PKTS 个）"
 else

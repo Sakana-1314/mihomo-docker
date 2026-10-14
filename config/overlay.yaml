@@ -18,7 +18,6 @@ ipv6: false
 unified-delay: true
 tcp-concurrent: true
 find-process-mode: 'off'
-global-client-fingerprint: chrome
 
 profile:
   store-selected: true

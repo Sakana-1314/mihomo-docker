@@ -56,8 +56,13 @@ sh "$GW_APP_DIR/firewall.sh" setup || gw_warn "透明代理规则应用失败（
 # ---- 子进程 ----
 sh "$GW_APP_DIR/mihomo-loop.sh" &
 MI_PID=$!
-httpd -f -p "$PANEL_PORT" -h "$GW_WWW_DIR" &
-HTTPD_PID=$!
+HTTPD_PID=''
+if gw_have httpd; then
+  httpd -f -p "$PANEL_PORT" -h "$GW_WWW_DIR" &
+  HTTPD_PID=$!
+else
+  gw_warn "未找到 httpd（busybox-extras），管理面板不可用；命令行 gw 不受影响"
+fi
 sh "$GW_APP_DIR/scheduler.sh" &
 SCHED_PID=$!
 
@@ -66,7 +71,9 @@ gw_log "管理面板：http://<网关IP>:$PANEL_PORT/  |  完整面板：http://
 # shellcheck disable=SC2317,SC2329  # 由 trap 调用（旧版 shellcheck 报 SC2317，新版报 SC2329）
 _shutdown() {
   gw_log "收到退出信号，正在停止服务…"
-  kill "$SCHED_PID" "$HTTPD_PID" "$MI_PID" 2>/dev/null
+  for _p in "$SCHED_PID" "$HTTPD_PID" "$MI_PID"; do
+    if [ -n "$_p" ]; then kill "$_p" 2>/dev/null; fi
+  done
   wait 2>/dev/null
   exit 0
 }

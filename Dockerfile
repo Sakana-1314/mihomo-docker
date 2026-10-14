@@ -21,7 +21,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    KERNEL_VERSION="$(go list -m -f '{{.Version}}' github.com/metacubex/mihomo)" \
+    mkdir -p /out \
+ && KERNEL_VERSION="$(go list -m -f '{{.Version}}' github.com/metacubex/mihomo)" \
  && echo "${KERNEL_VERSION}" > /out/kernel-version \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -tags with_gvisor -trimpath \

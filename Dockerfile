@@ -16,10 +16,19 @@ ARG GOLANG_VERSION=1.26
 FROM --platform=$BUILDPLATFORM golang:${GOLANG_VERSION}-alpine AS kernel
 ARG MIHOMO_VERSION
 ARG TARGETOS TARGETARCH
+# 模块代理带兜底（| 表示任意错误即切换下一个），go.sum 校验保证完整性
+ENV GOPROXY="https://proxy.golang.org|https://goproxy.cn|direct"
 RUN apk add --no-cache git
 WORKDIR /src
 RUN git clone --depth 1 --branch "${MIHOMO_VERSION}" https://github.com/MetaCubeX/mihomo.git .
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+
+# 依赖下载独立成层：网络抖动可重试，配合模块缓存提升重复构建效率
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download || { echo "依赖下载失败，重试…"; sleep 5; go mod download; }
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -tags "with_gvisor" -trimpath \
       -ldflags "-X github.com/metacubex/mihomo/constant.Version=${MIHOMO_VERSION} -w -s -buildid=" \
       -o /out/mihomo

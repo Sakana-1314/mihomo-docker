@@ -58,7 +58,7 @@ func (g *Gateway) Kernel() *kernel.Kernel { return g.k }
 // Settings 暴露运行期配置。
 func (g *Gateway) Settings() *settings.Settings { return g.s }
 
-// Boot 完成启动：播种配置、部署资源、初始化内核、引导订阅、合成初始配置、下发透明规则。
+// Boot 完成启动：播种配置、部署资源、初始化内核、下发透明规则、引导订阅、合成初始配置。
 func (g *Gateway) Boot() error {
 	out.Logf("米哈游 API 加速网关 启动中（mihomo-docker）")
 	g.k.SetLogLevel(g.s.LogLevel)
@@ -72,8 +72,12 @@ func (g *Gateway) Boot() error {
 		return err
 	}
 
+	// 先下发透明代理规则，再启动内核，确保规则就绪早于流量
+	g.SetupFirewall()
+
 	if err := g.bootstrap(); err != nil {
 		out.Warnf("订阅引导存在失败项：%v", err)
+		g.scheduleBootstrapRetry()
 	}
 
 	active := g.ActiveName()
@@ -99,7 +103,42 @@ func (g *Gateway) Boot() error {
 	if g.s.PanelAuth == "token" {
 		out.Logf("管理面板访问密钥（同时用于内核 API）：%s", g.s.Secret)
 	}
+	g.StartScheduler()
 	return nil
+}
+
+// scheduleBootstrapRetry 在首次引导失败（例如上游服务尚未就绪）时短期重试，
+// 避免长时间停留在空载基线直到下一个订阅更新周期。
+func (g *Gateway) scheduleBootstrapRetry() {
+	if len(g.subRefs()) == 0 {
+		return
+	}
+	go func() {
+		for i := 1; i <= 5; i++ {
+			time.Sleep(30 * time.Second)
+			pending := false
+			for _, e := range g.subRefs() {
+				if _, err := os.Stat(g.profilePath(e.Name)); err != nil {
+					pending = true
+				}
+			}
+			if !pending {
+				return
+			}
+			out.Logf("重试引导订阅（第 %d 次）", i)
+			if err := g.bootstrap(); err != nil {
+				continue
+			}
+			if name := g.ActiveName(); name != "" {
+				if err := g.Switch(name); err != nil {
+					out.Warnf("引导订阅生效失败：%v", err)
+					continue
+				}
+				out.Logf("引导订阅已生效：%s", name)
+				return
+			}
+		}
+	}()
 }
 
 // SetupFirewall 下发透明代理规则；失败只告警（仍可作为普通端口服务使用）。

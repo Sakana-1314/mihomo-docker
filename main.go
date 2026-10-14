@@ -70,10 +70,7 @@ func runDaemon() error {
 	go func() {
 		if err := gw.Boot(); err != nil {
 			out.Errf("网关初始化失败：%v", err)
-			return
 		}
-		gw.SetupFirewall()
-		gw.StartScheduler()
 	}()
 
 	sig := make(chan os.Signal, 1)

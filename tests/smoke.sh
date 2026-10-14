@@ -79,6 +79,14 @@ subscriptions:
     type: auto
 EOF
 
+SUB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$SUB_NAME")
+fixture_ready=false
+for _ in $(seq 1 30); do
+  if curl -fsS -m 3 "http://$SUB_IP/sub-node-only.yaml" >/dev/null 2>&1; then fixture_ready=true; break; fi
+  sleep 1
+done
+if [ "$fixture_ready" = true ]; then ok "订阅源已就绪（$SUB_IP）"; else bad "订阅源未就绪"; fi
+
 step "启动网关容器"
 docker run -d --name "$GW_NAME" --network "$NET" --privileged \
   --sysctl net.ipv4.ip_forward=1 \
@@ -99,9 +107,17 @@ for _ in $(seq 1 90); do
   sleep 2
 done
 if [ "$ready" = true ]; then ok "内核就绪"; else bad "内核未在预期时间内就绪"; fi
-if [ "$ready" != true ]; then
+
+fw_on=false
+for _ in $(seq 1 30); do
+  if panel /api/status | grep -q '"state":"on"'; then fw_on=true; break; fi
+  sleep 2
+done
+if [ "$fw_on" = true ]; then ok "透明代理规则就绪（内核启动前下发）"; else bad "透明代理规则未生效"; fi
+
+if [ "$ready" != true ] || [ "$fw_on" != true ]; then
   printf '  容器日志末段：\n'
-  docker logs "$GW_NAME" 2>&1 | tail -30 || true
+  docker logs "$GW_NAME" 2>&1 | tail -60 || true
 fi
 
 # ---------------------------------------------------------------- 启动与透明规则
@@ -214,7 +230,7 @@ printf '\n=========================================\n'
 printf '通过 %d 项，失败 %d 项\n' "$PASS" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
   printf '冒烟测试未通过，容器日志末段：\n'
-  docker logs "$GW_NAME" 2>&1 | tail -30 || true
+  docker logs "$GW_NAME" 2>&1 | tail -60 || true
   exit 1
 fi
 printf '冒烟测试通过\n'

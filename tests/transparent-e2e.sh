@@ -4,7 +4,7 @@
 # 在网关容器内创建客户端网络命名空间，经 veth 对导入真实转发流量：
 #   客户端 → 网关（TPROXY 捕获）→ 内核代理 → 目标服务
 # 断言依据：TPROXY 规则报文计数 + 内核流量计数 + 目标服务访问日志
-#   用法：IMAGE=ghcr.io/sakana-1314/mihomo-docker:dev bash tests/transparent-e2e.sh
+#   用法：IMAGE=ghcr.io/sakana-1314/mihomo:dev bash tests/transparent-e2e.sh
 # =============================================================================
 set -uo pipefail
 

@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/sakana-1314/mihomo-docker
+  IMAGE: ghcr.io/sakana-1314/mihomo
   KERNEL_REF: Meta
   RELEASE_TAG: dev
 

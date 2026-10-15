@@ -1,6 +1,6 @@
 services:
   mihomo-docker:
-    image: ghcr.io/sakana-1314/mihomo-docker:latest
+    image: ghcr.io/sakana-1314/mihomo:latest
     container_name: mihomo-docker
     restart: unless-stopped
     environment:

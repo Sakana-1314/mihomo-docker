@@ -3,7 +3,7 @@
 # 镜像冒烟测试（需 Docker）
 # 覆盖：启动与配置合成、透明规则下发、订阅自动拉取与更新、快捷切换、
 #       策略组节点切换、流量统计、面板鉴权与健康检查
-#   用法：IMAGE=ghcr.io/sakana-1314/mihomo-docker:dev bash tests/smoke.sh
+#   用法：IMAGE=ghcr.io/sakana-1314/mihomo:dev bash tests/smoke.sh
 #
 # 说明：镜像内只有单一二进制（gw），HTTP 断言在宿主机侧完成（宿主机具备 curl / python3）
 # =============================================================================

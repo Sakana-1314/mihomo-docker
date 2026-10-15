@@ -120,3 +120,43 @@ func TestIfaceWithoutAddressSkipped(t *testing.T) {
 		t.Fatalf("接口无地址时不应下发 TPROXY：%v", rules)
 	}
 }
+
+func TestParseIfaceNames(t *testing.T) {
+	// 模拟 `ip -4 -o addr show scope global`（多网卡容器：macvlan + bridge）
+	text := `2: eth1    inet 172.17.1.32/24 brd 172.17.1.255 scope global eth1\       valid_lft forever preferred_lft forever
+455: eth0    inet 192.168.5.250/24 brd 192.168.5.255 scope global eth0\       valid_lft forever preferred_lft forever
+2: eth1    inet 172.17.1.32/24 brd 172.17.1.255 scope global eth1\       valid_lft forever preferred_lft forever`
+	got := parseIfaceNames(text)
+	want := []string{"eth1", "eth0"}
+	if len(got) != len(want) {
+		t.Fatalf("应解析出去重后的 %v，实际 %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("第 %d 个接口应为 %s，实际 %s（%v）", i, want[i], got[i], got)
+		}
+	}
+	if n := parseIfaceNames(""); len(n) != 0 {
+		t.Fatalf("空输入应返回空：%v", n)
+	}
+	// 带 @ 的接口名（如 veth 别名）应截断到 @ 之前
+	if got := parseIfaceNames("7: veth0@if5    inet 10.0.0.1/24 scope global veth0"); len(got) != 1 || got[0] != "veth0" {
+		t.Fatalf("应截断 @ 后缀，实际 %v", got)
+	}
+}
+
+func TestMultiIfaceRulesCoverBothInterfaces(t *testing.T) {
+	m := tproxyManager()
+	m.ifaces = []string{"eth0", "eth1"}
+	rules := m.V4Rules(map[string]string{"eth0": "192.168.5.250", "eth1": "172.17.1.32"})
+	for _, want := range []string{
+		"mangle GW_TPROXY -i eth0 -p tcp -j TPROXY --on-port 7893",
+		"mangle GW_TPROXY -i eth1 -p tcp -j TPROXY --on-port 7893",
+		"-i eth0 -d 192.168.5.250/32 -j RETURN",
+		"-i eth1 -d 172.17.1.32/32 -j RETURN",
+	} {
+		if !contains(rules, want) {
+			t.Fatalf("多接口场景缺少规则：%s\n实际：%v", want, rules)
+		}
+	}
+}

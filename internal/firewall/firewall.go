@@ -125,9 +125,16 @@ func (m *Manager) sysctl(key, value string) {
 
 // ---------------------------------------------------------------- 接口识别
 
+// resolveIfaces 解析需要接管流量的接口。
+// 显式配置优先；否则取所有带全局 IPv4 的接口——容器内可能同时挂在 macvlan 与 bridge 上，
+// 且 Docker 的默认路由未必落在 macvlan 侧，因此不能只看默认路由。
+// 每个接口都会放行网关自身地址，本机服务（面板/控制器）不受影响。
 func (m *Manager) resolveIfaces() []string {
 	if len(m.cfg.Ifaces) > 0 {
 		return m.cfg.Ifaces
+	}
+	if ifaces := m.globalV4Ifaces(); len(ifaces) > 0 {
+		return ifaces
 	}
 	if text, err := capture("ip", "route", "show", "default"); err == nil {
 		fields := strings.Fields(text)
@@ -150,6 +157,42 @@ func (m *Manager) resolveIfaces() []string {
 		}
 	}
 	return nil
+}
+
+// globalV4Ifaces 列出所有带全局 IPv4 地址的接口（去重、保持顺序）。
+func (m *Manager) globalV4Ifaces() []string {
+	text, err := capture("ip", "-4", "-o", "addr", "show", "scope", "global")
+	if err != nil {
+		return nil
+	}
+	return parseIfaceNames(text)
+}
+
+// parseIfaceNames 解析 `ip -o addr` 输出中的接口名。
+// 形如：2: eth1    inet 172.17.1.32/24 brd ... scope global eth1
+func parseIfaceNames(text string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		fields := strings.Fields(parts[1])
+		if len(fields) == 0 {
+			continue
+		}
+		name := fields[0]
+		if at := strings.Index(name, "@"); at > 0 {
+			name = name[:at]
+		}
+		if name == "" || name == "lo" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 func ifaceAddr(iface string, family string) string {

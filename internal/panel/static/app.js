@@ -1,154 +1,117 @@
-/* =============================================================================
- * 米哈游 API 加速网关 · 管理面板脚本
- * 全部请求经同源 CGI 代理到内核 API，密钥仅保存在浏览器本地
- * ============================================================================= */
+/* 米哈游 API 加速网关 · 面板脚本（同源接口，密钥仅存浏览器本地） */
 'use strict';
 
 const TOKEN_KEY = 'gw_token';
-
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || '',
   status: null,
   groups: [],
   group: '',
-  secretVisible: false,
-  trafficTimer: null,
   statusTimer: null,
+  trafficTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
 
 /* ---------------------------------------------------------------- 工具 */
-function esc(value) {
-  return String(value === undefined || value === null ? '' : value).replace(/[&<>"']/g, (c) => (
+function esc(v) {
+  return String(v === undefined || v === null ? '' : v).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
 
-function fmtBytes(bytes) {
-  let n = Number(bytes) || 0;
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+function bytes(n) {
+  let v = Number(n) || 0;
+  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   let i = 0;
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
-  return i === 0 ? `${n} ${units[i]}` : `${n.toFixed(2)} ${units[i]}`;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i += 1; }
+  return i === 0 ? `${v} B` : `${v.toFixed(v < 10 ? 2 : 1)} ${u[i]}`;
 }
 
-function fmtTime(iso) {
+function time(iso) {
   if (!iso) return '-';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { hour12: false });
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (x) => String(x).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function toast(message, ok) {
-  const old = document.querySelector('.toast');
-  if (old) old.remove();
-  const el = document.createElement('div');
-  el.className = `toast ${ok ? 'ok' : 'bad'}`;
-  el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 4200);
+let toastTimer = null;
+function toast(msg, kind) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = `toast ${kind || ''}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), 4000);
 }
 
 async function api(path, options = {}) {
   const headers = Object.assign({}, options.headers || {});
   if (state.token) headers['X-Panel-Token'] = state.token;
   const res = await fetch(path, Object.assign({}, options, { headers, cache: 'no-store' }));
-  if (res.status === 401) {
-    showAuth(true);
-    throw new Error('unauthorized');
-  }
-  const data = await res.json().catch(() => ({}));
-  return data;
+  if (res.status === 401) { showAuth(true); throw new Error('unauthorized'); }
+  return res.json().catch(() => ({}));
 }
 
-function post(body) {
-  return api('cgi-bin/subs.sh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-    body,
-  });
+function form(obj) {
+  const p = new URLSearchParams();
+  Object.entries(obj).forEach(([k, v]) => p.set(k, v === undefined || v === null ? '' : v));
+  return p.toString();
 }
 
-/* ---------------------------------------------------------------- 鉴权 */
+/* ---------------------------------------------------------------- 登录 */
 function showAuth(show) {
-  $('auth-card').classList.toggle('hidden', !show);
-  $('main').classList.toggle('hidden', show);
+  $('auth').classList.toggle('hidden', !show);
+  $('app').classList.toggle('hidden', show);
 }
 
 function initAuth() {
-  $('token-save').addEventListener('click', () => {
-    const value = $('token-input').value.trim();
-    if (!value) return;
-    state.token = value;
-    localStorage.setItem(TOKEN_KEY, value);
+  $('auth-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('token-input').value.trim();
+    if (!v) return;
+    state.token = v;
+    localStorage.setItem(TOKEN_KEY, v);
     $('token-error').classList.add('hidden');
     start();
   });
-  $('token-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') $('token-save').click();
-  });
 }
 
-/* ---------------------------------------------------------------- 概览 */
-function kv(label, value, cls) {
-  return `<div class="kv"><span>${esc(label)}</span><span class="val ${cls || ''}">${value}</span></div>`;
-}
-
-function renderOverview(st) {
-  const t = st.transparent || {};
-  const p = t.ports || {};
+/* ---------------------------------------------------------------- 状态 */
+function renderStatus(st) {
   const k = st.kernel || {};
-  const ipv6Map = { block: '阻断转发（推荐）', proxy: '透明代理', pass: '直通' };
-  const rows = [
-    kv('内核状态', k.online ? `在线 · ${esc(k.version)}` : '离线', k.online ? 'ok' : 'bad'),
-    kv('活跃订阅', st.active ? esc(st.active) : '空载基线'),
-    kv('透明代理', `${t.state === 'on' ? '已生效' : '未生效'} · ${esc(t.mode || '-')}（${esc(t.interface || '-')}）`,
-      t.state === 'on' ? 'ok' : 'bad'),
-    kv('DNS 劫持', t.dns_hijack ? `开启 · 端口 ${esc(t.dns_port)}` : '关闭'),
-    kv('IPv6 策略', esc(ipv6Map[t.ipv6] || t.ipv6 || '-')),
-    kv('监听端口', `混合 ${p.mixed} · 透明 ${t.mode === 'redir' ? p.redir : p.tproxy} · 控制 ${p.controller} · 面板 ${p.panel}`),
-  ];
-  $('overview').innerHTML = rows.join('');
-  $('kernel-badge').textContent = k.online ? `内核：${k.version}` : '内核：离线';
-  $('kernel-badge').className = `badge ${k.online ? 'ok' : 'bad'}`;
-  $('fw-badge').textContent = `透明代理：${t.state === 'on' ? '已生效' : '未生效'}`;
-  $('fw-badge').className = `badge ${t.state === 'on' ? 'ok' : 'bad'}`;
-  $('brand-sub').textContent = `mihomo-docker · ${st.active ? `当前订阅 ${st.active}` : '空载基线'}`;
-  renderLinks(st, p);
+  const t = st.transparent || {};
+  const subs = st.subs || {};
+
+  const pill = (el, ok, text) => {
+    el.className = `pill ${ok ? 'ok' : 'bad'}`;
+    el.textContent = text;
+  };
+  pill($('p-kernel'), k.online, k.online ? `内核 ${k.version}` : '内核离线');
+  pill($('p-fw'), t.state === 'on', `透明代理 ${t.mode}`);
+  const active = st.active || 'baseline';
+  pill($('p-sub'), true, `订阅 ${active}`);
+
+  $('t-mode').textContent = t.mode;
+  $('t-ipv6').textContent = t.ipv6;
+  renderTraffic(st.traffic);
+  renderSubs(subs);
+  renderLinks(st, t.ports || {});
 }
 
-function renderLinks(st, ports) {
-  const host = location.hostname;
-  const panelUrl = location.origin + location.pathname;
-  const dashUrl = `http://${host}:${ports.controller}/ui/`;
-  const apiUrl = `http://${host}:${ports.controller}`;
-  $('panel-link').textContent = panelUrl;
-  $('panel-link').href = panelUrl;
-  $('dash-link').textContent = dashUrl;
-  $('dash-link').href = dashUrl;
-  $('api-addr').textContent = apiUrl;
-  const secret = (st.panel && st.panel.secret) || '';
-  $('secret-text').textContent = secret ? (state.secretVisible ? secret : '••••••••••••') : '（未启用）';
-}
-
-/* ---------------------------------------------------------------- 流量 */
-function renderTraffic(t) {
-  if (!t || typeof t !== 'object') return;
-  $('t-down-total').textContent = fmtBytes(t.down_total);
-  $('t-up-total').textContent = fmtBytes(t.up_total);
-  $('t-down-speed').textContent = `${fmtBytes(t.down_speed)}/s`;
-  $('t-up-speed').textContent = `${fmtBytes(t.up_speed)}/s`;
-  $('t-conns').textContent = t.connections;
-  $('t-memory').textContent = fmtBytes(t.memory);
-  $('traffic-updated').textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`;
+function renderTraffic(tr) {
+  if (!tr || typeof tr !== 'object') return;
+  $('t-down-speed').textContent = `${bytes(tr.down_speed)}/s`;
+  $('t-up-speed').textContent = `${bytes(tr.up_speed)}/s`;
+  $('t-down-total').textContent = bytes(tr.down_total);
+  $('t-up-total').textContent = bytes(tr.up_total);
+  $('t-conns').textContent = tr.connections;
+  $('t-memory').textContent = bytes(tr.memory);
 }
 
 async function refreshTraffic() {
   if (document.visibilityState !== 'visible' || !state.status) return;
-  try {
-    const t = await api('api/traffic');
-    renderTraffic(t);
-  } catch (e) { /* 忽略瞬时错误 */ }
+  try { renderTraffic(await api('api/traffic')); } catch (e) { /* 忽略瞬时错误 */ }
 }
 
 /* ---------------------------------------------------------------- 订阅 */
@@ -156,117 +119,108 @@ function renderSubs(subs) {
   const tbody = $('subs-table').querySelector('tbody');
   const items = (subs && subs.items) || [];
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="hint">尚未配置订阅：可在下方新增，或编辑 /data/config/subscriptions.yaml</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">无订阅</td></tr>';
     return;
   }
   tbody.innerHTML = items.map((it) => {
-    const active = it.name === subs.active;
-    const status = it.status === 'ok'
-      ? '<span class="status-ok">正常</span>'
-      : (it.status === 'pending'
-        ? '<span class="status-warn">尚未拉取</span>'
-        : `<span class="status-bad">失败：${esc(it.error || '未知')}</span>`);
-    const switchBtn = active
-      ? '<button class="tiny" disabled>当前</button>'
-      : `<button class="tiny" data-op="switch" data-name="${esc(it.name)}">切换</button>`;
-    return `<tr class="${active ? 'active' : ''}">
-      <td>${esc(it.name)}<span class="hint">${active ? ' · 当前' : ''}</span></td>
-      <td>${esc(it.type || 'auto')}</td>
-      <td>${esc(it.nodes)}</td>
-      <td>${esc(fmtTime(it.updated_at))}</td>
-      <td>${status}</td>
-      <td class="right"><div class="ops">
-        ${switchBtn}
-        <button class="tiny" data-op="update" data-name="${esc(it.name)}">更新</button>
-        <button class="tiny danger" data-op="del" data-name="${esc(it.name)}">删除</button>
-      </div></td></tr>`;
+    const isActive = it.name === subs.active;
+    let cls = 'state';
+    let label = '正常';
+    if (it.status === 'ok') { cls += ' ok'; }
+    else if (it.status === 'pending' || !it.status) { cls += ' pending'; label = '未拉取'; }
+    else { cls += ' bad'; label = `失败 ${esc(it.error || '')}`.trim(); }
+    const op = isActive
+      ? '<button class="btn tiny" disabled>使用中</button>'
+      : `<button class="btn tiny" data-op="switch" data-name="${esc(it.name)}">切换</button>`;
+    return `<tr class="${isActive ? 'active' : ''}">
+      <td>${esc(it.name)}</td>
+      <td class="mono">${esc(it.type || 'auto')}</td>
+      <td class="num mono">${it.nodes || 0}</td>
+      <td class="mono">${esc(time(it.updated_at))}</td>
+      <td><span class="${cls}">${label}</span></td>
+      <td class="right"><span class="ops">
+        ${op}
+        <button class="btn tiny" data-op="update" data-name="${esc(it.name)}">更新</button>
+        <button class="btn tiny danger" data-op="del" data-name="${esc(it.name)}">删除</button>
+      </span></td></tr>`;
   }).join('');
 }
 
-async function subsAction(url, body, label, method) {
-  $('subs-message').textContent = `${label}…`;
+async function subsAction(path, body, label, method) {
   try {
-    const data = await api(url, {
+    const data = await api(path, {
       method: method || 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: body || '',
     });
-    const ok = data.ok;
-    $('subs-message').textContent = data.output || (ok ? '完成' : (data.error || '失败'));
-    if (!ok) toast((data.output || data.error || '操作失败'), false);
-    else toast(`${label}完成`, true);
+    if (data.ok) toast(data.output || label, 'ok');
+    else toast(data.output || data.error || '失败', 'bad');
     if (data.subs) renderSubs(data.subs);
     await refreshStatus();
-  } catch (e) {
-    $('subs-message').textContent = '请求失败';
-  }
+  } catch (e) { /* 401 已处理 */ }
 }
 
 function initSubs() {
-  $('subs-refresh').addEventListener('click', () => refreshStatus(true));
-  $('subs-update-all').addEventListener('click', () => subsAction('api/subs/update', 'name=all', '更新全部订阅'));
+  $('subs-update-all').addEventListener('click', () => subsAction('api/subs/update', form({ name: 'all' }), '订阅已更新'));
   $('add-submit').addEventListener('click', () => {
     const name = $('add-name').value.trim();
     const url = $('add-url').value.trim();
-    const type = $('add-type').value;
-    if (!name || !url) { toast('请填写名称与订阅地址', false); return; }
-    subsAction('api/subs', `name=${encodeURIComponent(name)}&url=${encodeURIComponent(url)}&type=${encodeURIComponent(type)}`, '添加订阅');
+    if (!name || !url) { toast('名称与地址必填', 'bad'); return; }
+    subsAction('api/subs', form({ name, url, type: $('add-type').value }), `已添加 ${name}`).then(() => {
+      $('add-name').value = '';
+      $('add-url').value = '';
+    });
   });
   $('subs-table').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-op]');
     if (!btn) return;
     const name = btn.getAttribute('data-name');
     const op = btn.getAttribute('data-op');
-    if (op === 'switch') subsAction('api/subs/switch', `name=${encodeURIComponent(name)}`, `切换到 ${name}`);
-    if (op === 'update') subsAction('api/subs/update', `name=${encodeURIComponent(name)}`, `更新 ${name}`);
-    if (op === 'del' && window.confirm(`确认删除订阅 ${name}？`)) {
-      subsAction(`api/subs/${encodeURIComponent(name)}`, '', `删除 ${name}`, 'DELETE');
+    if (op === 'switch') subsAction('api/subs/switch', form({ name }), `已切换到 ${name}`);
+    if (op === 'update') subsAction('api/subs/update', form({ name }), `${name} 已更新`);
+    if (op === 'del' && window.confirm(`删除订阅 ${name}？`)) {
+      subsAction(`api/subs/${encodeURIComponent(name)}`, '', `已删除 ${name}`, 'DELETE');
     }
   });
 }
 
-/* ---------------------------------------------------------------- 节点 */
+/* ---------------------------------------------------------------- 分组 */
 async function refreshNodes() {
   try {
     const data = await api('api/nodes');
-    if (!data.ok) { $('nodes-grid').innerHTML = `<span class="hint">${esc(data.error || '内核未就绪')}</span>`; return; }
     state.groups = data.groups || [];
     if (!state.groups.length) {
       $('group-select').innerHTML = '';
-      $('nodes-grid').innerHTML = '<span class="hint">暂无策略组（配置中未包含 proxy-groups）</span>';
+      $('group-now').textContent = '';
+      $('nodes-grid').innerHTML = '<span class="empty">无策略组</span>';
       return;
     }
     if (!state.groups.some((g) => g.name === state.group)) state.group = state.groups[0].name;
     $('group-select').innerHTML = state.groups
-      .map((g) => `<option value="${esc(g.name)}" ${g.name === state.group ? 'selected' : ''}>${esc(g.name)}（${esc(g.type)}）</option>`)
+      .map((g) => `<option value="${esc(g.name)}" ${g.name === state.group ? 'selected' : ''}>${esc(g.name)} · ${esc(g.type)}</option>`)
       .join('');
     renderNodes();
   } catch (e) { /* 忽略 */ }
 }
 
 function renderNodes() {
-  const group = state.groups.find((g) => g.name === state.group);
-  if (!group) return;
-  $('group-now').textContent = `当前：${group.now || '-'} · 共 ${group.nodes.length} 个节点`;
-  $('nodes-grid').innerHTML = group.nodes.map((n) => (
-    `<button class="node ${n === group.now ? 'selected' : ''}" data-node="${esc(n)}" title="${esc(n)}">${esc(n)}</button>`
-  )).join('');
+  const g = state.groups.find((x) => x.name === state.group);
+  if (!g) return;
+  $('group-now').textContent = `${g.now || '-'} · ${g.nodes.length}`;
+  $('nodes-grid').innerHTML = g.nodes.map((n) => (
+    `<button class="node ${n === g.now ? 'selected' : ''}" data-node="${esc(n)}" title="${esc(n)}">${esc(n)}</button>`
+  )).join('') || '<span class="empty">无节点</span>';
 }
 
 async function selectNode(node) {
-  const group = state.group;
   try {
     const data = await api('api/nodes/select', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: `group=${encodeURIComponent(group)}&node=${encodeURIComponent(node)}`,
+      body: form({ group: state.group, node }),
     });
-    if (data.ok) {
-      toast(`已切换到 ${node}`, true);
-      refreshNodes();
-    } else {
-      toast(data.error || '切换失败', false);
-    }
+    if (data.ok) { toast(`已切换到 ${node}`, 'ok'); refreshNodes(); }
+    else toast(data.error || '切换失败', 'bad');
   } catch (e) { /* 忽略 */ }
 }
 
@@ -279,44 +233,51 @@ function initNodes() {
   });
 }
 
-/* ---------------------------------------------------------------- 密钥展示 */
-function initSecret() {
-  $('secret-toggle').addEventListener('click', () => {
-    state.secretVisible = !state.secretVisible;
-    $('secret-toggle').textContent = state.secretVisible ? '隐藏' : '显示';
-    if (state.status) renderLinks(state.status, (state.status.transparent || {}).ports || {});
-  });
+/* ---------------------------------------------------------------- 入口 */
+function renderLinks(st, ports) {
+  const host = location.hostname;
+  const panel = `${location.origin}/`;
+  const dash = `http://${host}:${ports.controller}/ui/`;
+  $('panel-link').textContent = `${host}:${ports.panel}`;
+  $('panel-link').href = panel;
+  $('dash-link').textContent = `${host}:${ports.controller}/ui/`;
+  $('dash-link').href = dash;
+  $('api-addr').textContent = `${host}:${ports.controller}`;
+  const secret = (st.panel && st.panel.secret) || '';
+  $('secret-text').textContent = secret || '未启用';
+  $('secret-text').dataset.secret = secret;
+}
+
+function initLinks() {
   $('secret-copy').addEventListener('click', async () => {
-    const secret = (state.status && state.status.panel && state.status.panel.secret) || '';
-    if (!secret) { toast('当前未启用访问密钥', false); return; }
-    try {
-      await navigator.clipboard.writeText(secret);
-      toast('访问密钥已复制', true);
-    } catch (e) {
-      toast('复制失败，请手动选择文本', false);
-    }
+    const secret = $('secret-text').dataset.secret || '';
+    if (!secret) { toast('未启用访问密钥', 'bad'); return; }
+    try { await navigator.clipboard.writeText(secret); toast('密钥已复制', 'ok'); }
+    catch (e) { toast('复制失败', 'bad'); }
+  });
+  $('btn-key').addEventListener('click', () => {
+    const secret = $('secret-text').dataset.secret || '';
+    toast(secret ? `访问密钥：${secret}` : '未启用访问密钥', 'ok');
   });
 }
 
 /* ---------------------------------------------------------------- 主流程 */
-async function refreshStatus(forceSubs) {
+async function refreshStatus() {
   try {
     const st = await api('api/status');
     state.status = st;
-    renderOverview(st);
-    renderTraffic(st.traffic);
-    if (forceSubs || st.subs) renderSubs(st.subs);
+    renderStatus(st);
   } catch (e) { /* 401 已处理 */ }
 }
 
 function start() {
   showAuth(false);
-  refreshStatus(true);
+  refreshStatus();
   refreshTraffic();
   refreshNodes();
-  if (state.statusTimer) clearInterval(state.statusTimer);
-  if (state.trafficTimer) clearInterval(state.trafficTimer);
-  state.statusTimer = setInterval(() => refreshStatus(false), 6000);
+  clearInterval(state.statusTimer);
+  clearInterval(state.trafficTimer);
+  state.statusTimer = setInterval(refreshStatus, 5000);
   state.trafficTimer = setInterval(refreshTraffic, 2000);
 }
 
@@ -324,18 +285,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initAuth();
   initSubs();
   initNodes();
-  initSecret();
-  $('refresh-overview').addEventListener('click', () => refreshStatus(true));
+  initLinks();
+  $('btn-refresh').addEventListener('click', () => { refreshStatus(); refreshNodes(); });
 
   if (state.token) {
     start();
   } else {
-    // 未持有密钥时先探测：面板未启用密钥（PANEL_AUTH=none）则直接进入
-    api('api/status')
-      .then((st) => {
-        state.status = st;
-        start();
-      })
-      .catch(() => showAuth(true));
+    api('api/status').then((st) => { state.status = st; start(); }).catch(() => showAuth(true));
   }
 });
